@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../widgets/ez_panel.dart';
 
 class Phase0BypassView extends ConsumerWidget {
   const Phase0BypassView({super.key});
@@ -90,7 +89,7 @@ class Phase0BypassView extends ConsumerWidget {
           border: Border.all(color: const Color(0xFF333333)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.2),
+              color: Colors.black.withValues(alpha: 0.2),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),

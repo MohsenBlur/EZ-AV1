@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/navigation_provider.dart';
+import '../views/phase0_bypass_view.dart';
+import '../views/phase1_texture_view.dart';
+import '../views/phase2_bitrate_view.dart';
 
 class AppShell extends ConsumerWidget {
   const AppShell({super.key});
@@ -93,11 +96,11 @@ class AppShell extends ConsumerWidget {
   Widget _buildContent(int index) {
     switch (index) {
       case 0:
-        return const Center(child: Text('Batch Queue View'));
+        return const Phase0BypassView();
       case 1:
-        return const Center(child: Text('Phase 1: Texture Lock'));
+        return const Phase1TextureView();
       case 2:
-        return const Center(child: Text('Phase 2: Bitrate Efficiency'));
+        return const Phase2BitrateView();
       case 3:
         return const Center(child: Text('Settings View'));
       default:
