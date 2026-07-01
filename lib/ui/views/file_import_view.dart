@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 import '../../providers/workflow_provider.dart';
 import '../../providers/navigation_provider.dart';
+import '../../providers/batch_queue_provider.dart';
 
 const validExtensions = ['.mkv', '.mp4', '.mov', '.avi', '.m2ts', '.webm', '.flv'];
 
@@ -51,6 +52,8 @@ class _FileImportViewState extends ConsumerState<FileImportView> {
 
     if (validFiles.isNotEmpty) {
       ref.read(workflowProvider.notifier).addBatchFiles(validFiles);
+      await ref.read(batchQueueProvider.notifier).addFiles(validFiles);
+      
       // Auto-advance to Source Type phase
       ref.read(selectedTabProvider.notifier).setTab(1);
     } else {

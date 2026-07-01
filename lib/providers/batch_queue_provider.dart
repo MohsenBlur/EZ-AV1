@@ -60,6 +60,29 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     _saveState();
   }
 
+  /// Adds a list of flat file paths to the queue
+  Future<void> addFiles(List<String> filePaths) async {
+    final newNodes = <BatchNode>[];
+    for (final path in filePaths) {
+      final file = File(path);
+      if (await file.exists()) {
+        final stat = await file.stat();
+        newNodes.add(FileNode(
+          id: _uuid.v4(),
+          name: p.basename(path),
+          absolutePath: file.absolute.path,
+          extension: p.extension(path).toLowerCase(),
+          sizeBytes: stat.size,
+        ));
+      }
+    }
+    if (newNodes.isNotEmpty) {
+      state = [...state, ...newNodes];
+      _recalculateState();
+      _saveState();
+    }
+  }
+
   Future<List<BatchNode>> _parseDirectory(Directory dir) async {
     final nodes = <BatchNode>[];
     try {

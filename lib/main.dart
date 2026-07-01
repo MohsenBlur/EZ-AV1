@@ -11,9 +11,7 @@ void main() {
   EnvironmentService.init();
 
   // Initialize media_kit for native video playback using our custom Shinchiro build
-  MediaKit.ensureInitialized(
-    libmpv: '${EnvironmentService.binDirectory}\\mpv-2.dll',
-  );
+  MediaKit.ensureInitialized();
 
   runApp(const ProviderScope(child: EzAv1App()));
 }

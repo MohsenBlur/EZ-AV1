@@ -5,6 +5,9 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../../providers/execution_provider.dart';
 import '../../providers/navigation_provider.dart';
+import '../../providers/workflow_provider.dart';
+import '../../providers/batch_queue_provider.dart';
+import '../../models/preset_model.dart';
 import '../widgets/ez_panel.dart';
 
 class Phase2BitrateView extends ConsumerStatefulWidget {
@@ -36,9 +39,9 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       // Configure looping for seamless visual comparison of small chunks
       player.setPlaylistMode(PlaylistMode.loop);
       
-      // In reality, this would load the encoded test chunks:
-      // player.open(Media('path/to/test_chunk_$i.mkv'), play: false);
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initMedia();
+    });
 
     // Master Clock Drift Enforcer
     _players[0]?.stream.position.listen((masterPos) {
@@ -50,6 +53,18 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
         }
       }
     });
+  }
+  
+  void _initMedia() {
+    final batchFiles = ref.read(workflowProvider).batchFiles;
+    if (batchFiles.isEmpty) return;
+    
+    final currentVideoPath = batchFiles.first;
+    for (int i = 0; i < 4; i++) {
+      // For now, load the original video in all 4 panes.
+      // In a real flow, this would load the encoded test chunks.
+      _players[i]?.open(Media(currentVideoPath), play: _isPlaying);
+    }
   }
 
   @override
@@ -170,7 +185,22 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
               const SizedBox(width: 16),
               ElevatedButton.icon(
                 onPressed: () {
-                  // TODO: Save preset and Queue for Batch
+                  final preset = PresetModel(
+                    id: DateTime.now().millisecondsSinceEpoch.toString(),
+                    name: 'Auto-VMAF ${_vmafTargets[_selectedTargetIndex].toInt()}',
+                    targetVmaf: _vmafTargets[_selectedTargetIndex],
+                    photonNoise: _smartReveal ? 0 : 20,
+                  );
+                  
+                  // Apply to all files for the quick flow
+                  final batchNodes = ref.read(batchQueueProvider);
+                  final batchNotifier = ref.read(batchQueueProvider.notifier);
+                  for (var node in batchNodes) {
+                    batchNotifier.assignPreset(node.id, preset);
+                  }
+                  
+                  ref.read(workflowProvider.notifier).completePhase2();
+                  ref.read(selectedTabProvider.notifier).setTab(4); // Execution
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green, // Queue button color

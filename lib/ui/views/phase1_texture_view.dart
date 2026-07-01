@@ -10,6 +10,8 @@ import '../../services/vapoursynth_service.dart';
 import '../widgets/ez_panel.dart';
 import '../widgets/ez_slider.dart';
 
+import '../../providers/workflow_provider.dart';
+
 class Phase1TextureView extends ConsumerStatefulWidget {
   const Phase1TextureView({super.key});
 
@@ -28,6 +30,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
   double _splitPosition = 0.5; // 0.0 to 1.0 (50% default)
   Timer? _debounce;
   bool _isCompilingScript = false;
+  String? _currentVideoPath;
 
   @override
   void initState() {
@@ -42,9 +45,28 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     _originalPlayer.setPlaylistMode(PlaylistMode.loop);
     _filteredPlayer.setPlaylistMode(PlaylistMode.loop);
     
-    // In a real flow, load actual media
-    // _originalPlayer.open(Media('path/to/original.mkv'));
-    // _filteredPlayer.open(Media('path/to/script.vpy'));
+    // Load initial media after first frame when ref is available
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initMedia();
+    });
+  }
+  
+  Future<void> _initMedia() async {
+    final batchFiles = ref.read(workflowProvider).batchFiles;
+    if (batchFiles.isNotEmpty) {
+      _currentVideoPath = batchFiles.first;
+      await _originalPlayer.open(Media(_currentVideoPath!), play: true);
+      
+      setState(() => _isCompilingScript = true);
+      try {
+        final scriptPath = await VapourSynthService.generateDenoiseScript(_currentVideoPath!, _denoiseStrength);
+        await _filteredPlayer.open(Media(scriptPath), play: true);
+      } catch (e) {
+        debugPrint('Script error: $e');
+      } finally {
+        if (mounted) setState(() => _isCompilingScript = false);
+      }
+    }
   }
 
   @override
@@ -65,10 +87,9 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     _debounce = Timer(const Duration(milliseconds: 400), () async {
       setState(() => _isCompilingScript = true);
       
-      // In a real app, videoPath comes from the selected BatchNode
-      const dummyVideoPath = 'C:\\dummy\\video.mkv'; 
+      if (_currentVideoPath == null) return;
       try {
-        final scriptPath = await VapourSynthService.generateDenoiseScript(dummyVideoPath, _denoiseStrength);
+        final scriptPath = await VapourSynthService.generateDenoiseScript(_currentVideoPath!, _denoiseStrength);
         
         // Save current position to seamless seek after reload
         final currentPosition = _originalPlayer.state.position;
@@ -76,7 +97,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
         await _filteredPlayer.open(Media(scriptPath), play: true);
         await _filteredPlayer.seek(currentPosition);
       } catch (e) {
-        // Handle script generation errors
+        debugPrint('Script error: $e');
       } finally {
         if (mounted) setState(() => _isCompilingScript = false);
       }
@@ -156,7 +177,10 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
               ),
               const Spacer(),
               ElevatedButton.icon(
-                onPressed: () {},
+                onPressed: () {
+                  ref.read(workflowProvider.notifier).completePhase1();
+                  ref.read(selectedTabProvider.notifier).setTab(3); // Bitrate
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.primary,
                   foregroundColor: Colors.black,
