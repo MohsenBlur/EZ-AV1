@@ -1,5 +1,7 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import '../models/batch_node_model.dart';
 import '../models/preset_model.dart';
@@ -10,9 +12,42 @@ final batchQueueProvider = NotifierProvider<BatchQueueNotifier, List<BatchNode>>
 });
 
 class BatchQueueNotifier extends Notifier<List<BatchNode>> {
-  @override
-  List<BatchNode> build() => [];
   final _uuid = const Uuid();
+
+  @override
+  List<BatchNode> build() {
+    // Initial load happens asynchronously.
+    _loadState();
+    return [];
+  }
+
+  Future<void> _loadState() async {
+    try {
+      final directory = await getApplicationSupportDirectory();
+      final file = File('${directory.path}\\state.json');
+      if (file.existsSync()) {
+        final content = await file.readAsString();
+        final List<dynamic> jsonList = jsonDecode(content);
+        state = jsonList.map((e) => BatchNode.fromJson(e as Map<String, dynamic>)).toList();
+        _recalculateState();
+      }
+    } catch (e) {
+      // Ignore load errors, start fresh
+    }
+  }
+
+  Future<void> _saveState() async {
+    try {
+      final directory = await getApplicationSupportDirectory();
+      if (!directory.existsSync()) {
+        directory.createSync(recursive: true);
+      }
+      final file = File('${directory.path}\\state.json');
+      await file.writeAsString(jsonEncode(state.map((e) => e.toJson()).toList()));
+    } catch (e) {
+      // Ignore save errors
+    }
+  }
 
   /// Recursively parses a directory from disk and loads it into the queue.
   Future<void> importDirectory(String path) async {
@@ -22,6 +57,7 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     final rootNodes = await _parseDirectory(dir);
     state = [...state, ...rootNodes];
     _recalculateState();
+    _saveState();
   }
 
   Future<List<BatchNode>> _parseDirectory(Directory dir) async {
@@ -77,7 +113,31 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     if (node != null) {
       node.assignedPreset = preset;
       _recalculateState();
+      _saveState();
     }
+  }
+
+  /// Removes a node by ID
+  void removeNode(String nodeId) {
+    bool removed = _removeNodeRecursive(state, nodeId);
+    if (removed) {
+      _recalculateState();
+      _saveState();
+    }
+  }
+
+  bool _removeNodeRecursive(List<BatchNode> nodes, String id) {
+    for (int i = 0; i < nodes.length; i++) {
+      if (nodes[i].id == id) {
+        nodes.removeAt(i);
+        return true;
+      }
+      final node = nodes[i];
+      if (node is DirectoryNode) {
+        if (_removeNodeRecursive(node.children, id)) return true;
+      }
+    }
+    return false;
   }
 
   /// Finds a node by ID recursively

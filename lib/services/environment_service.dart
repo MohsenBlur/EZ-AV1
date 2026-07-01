@@ -3,6 +3,13 @@ import 'package:path/path.dart' as p;
 import 'package:flutter/foundation.dart';
 import 'native_path_helper.dart';
 
+class EnvironmentException implements Exception {
+  final String message;
+  EnvironmentException(this.message);
+  @override
+  String toString() => 'EnvironmentException: $message';
+}
+
 class EnvironmentService {
   static late final String binDirectory;
   static late final String pythonDirectory;
@@ -12,18 +19,14 @@ class EnvironmentService {
   static late final String svtAv1Path;
 
   /// Initializes the environment by resolving the absolute paths
-  /// to the bundled portable binaries.
+  /// to the bundled portable binaries. Throws EnvironmentException if missing.
   static void init() {
     String rootPath;
     
-    // In debug mode, the working directory is usually the project root.
-    // In release mode, we might need to find the executable path.
     if (kDebugMode) {
       rootPath = Directory.current.path;
     } else {
       rootPath = p.dirname(Platform.resolvedExecutable);
-      // In production, assets might be nested in a data/flutter_assets folder
-      // but for simplicity, we assume the setup script places it relative to root.
     }
 
     binDirectory = p.join(rootPath, 'assets', 'bin');
@@ -33,6 +36,22 @@ class EnvironmentService {
     ffprobePath = p.join(binDirectory, 'ffprobe.exe');
     av1anPath = p.join(binDirectory, 'av1an.exe');
     svtAv1Path = p.join(binDirectory, 'SvtAv1EncApp.exe');
+
+    // Physical File Validation
+    final requiredBinaries = [
+      ffmpegPath,
+      ffprobePath,
+      av1anPath,
+      svtAv1Path,
+      p.join(binDirectory, 'mpv-2.dll'),
+      p.join(binDirectory, 'vapoursynth.dll'),
+    ];
+
+    for (final path in requiredBinaries) {
+      if (!File(path).existsSync()) {
+        throw EnvironmentException('Missing critical component: ${p.basename(path)}');
+      }
+    }
 
     _injectPath();
   }

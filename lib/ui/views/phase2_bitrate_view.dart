@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -77,9 +78,18 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Top Toolbar
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event.logicalKey == LogicalKeyboardKey.space && event is KeyDownEvent) {
+          _togglePlayPause();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Column(
+        children: [
+          // Top Toolbar
         Container(
           height: 48,
           color: const Color(0xFF141414),
@@ -228,6 +238,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
           ),
         ),
       ],
+      ),
     );
   }
 

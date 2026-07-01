@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'environment_service.dart';
 
 class FfprobeService {
@@ -30,7 +31,7 @@ class FfprobeService {
       }
     } catch (e) {
       // Log error (for production, use a proper logger)
-      print('FFprobe error: $e');
+      debugPrint('FFprobe error: $e');
     }
     
     // Default fallback

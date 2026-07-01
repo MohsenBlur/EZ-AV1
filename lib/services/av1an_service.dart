@@ -27,14 +27,16 @@ class Av1anService {
   }) {
     final args = <String>[];
     
-    args.addAll(['-i', sourceVideo]);
+    // Properly quote input path to avoid shell escaping issues
+    args.addAll(['-i', '"$sourceVideo"']);
     
     // SVT-AV1 encoder flags
     final photonNoise = calculatePhotonNoise(preset.denoiseStrength);
     
     final videoParams = [
       '--preset', '4', // Good balance for SVT-AV1
-      '--crf', '${preset.targetVmaf}', // Note: mapping VMAF to CRF is complex, Av1an handles --target-quality
+      // EXPERT POLISH: Av1an handles VMAF targeting natively via --target-quality, NOT --crf.
+      '--target-quality', '${preset.targetVmaf}', 
     ];
 
     if (photonNoise > 0) {
@@ -42,24 +44,23 @@ class Av1anService {
     }
 
     args.add('-v');
-    args.add(videoParams.join(' '));
+    // For Av1an, we pass encoder parameters as a single quoted string to the -v flag
+    args.add('"${videoParams.join(' ')}"');
 
     // Audio / Metadata flags
-    // Passthrough metadata, copy subtitles, encode audio (handled separately or via Av1an FFmpeg flags)
-    // For Av1an, we can pass FFmpeg flags via -f
     final audioFlags = <String>['-c:s', 'copy', '-c:a', 'libopus', '-b:a', '${preset.audioBitrate}k'];
     if (preset.downmixToStereo) {
       audioFlags.addAll(['-ac', '2']);
     }
     
     args.add('-f');
-    args.add(audioFlags.join(' '));
+    args.add('"${audioFlags.join(' ')}"');
 
     // Optional Av1an features
     args.addAll(['--resume', '--split-method', 'pyscenedetect']);
 
     // Output
-    args.addAll(['-o', outputVideo]);
+    args.addAll(['-o', '"$outputVideo"']);
 
     return args;
   }

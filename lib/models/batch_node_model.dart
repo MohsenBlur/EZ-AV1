@@ -18,6 +18,16 @@ abstract class BatchNode {
   /// The effective preset, which might be inherited or overridden.
   /// (This will be computed by the provider logic, but we can store it here)
   PresetModel? effectivePreset;
+
+  Map<String, dynamic> toJson();
+
+  static BatchNode fromJson(Map<String, dynamic> json) {
+    if (json['type'] == 'directory') {
+      return DirectoryNode.fromJson(json);
+    } else {
+      return FileNode.fromJson(json);
+    }
+  }
 }
 
 class FileNode extends BatchNode {
@@ -32,6 +42,30 @@ class FileNode extends BatchNode {
     required this.extension,
     required this.sizeBytes,
   });
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'file',
+    'id': id,
+    'name': name,
+    'absolutePath': absolutePath,
+    'extension': extension,
+    'sizeBytes': sizeBytes,
+    'assignedPreset': assignedPreset?.toJson(),
+  };
+
+  factory FileNode.fromJson(Map<String, dynamic> json) {
+    return FileNode(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      absolutePath: json['absolutePath'] as String,
+      extension: json['extension'] as String,
+      sizeBytes: json['sizeBytes'] as int,
+      assignedPreset: json['assignedPreset'] != null 
+          ? PresetModel.fromJson(json['assignedPreset'] as Map<String, dynamic>) 
+          : null,
+    );
+  }
 }
 
 class DirectoryNode extends BatchNode {
@@ -47,4 +81,28 @@ class DirectoryNode extends BatchNode {
     super.assignedPreset,
     this.children = const [],
   });
+
+  @override
+  Map<String, dynamic> toJson() => {
+    'type': 'directory',
+    'id': id,
+    'name': name,
+    'absolutePath': absolutePath,
+    'assignedPreset': assignedPreset?.toJson(),
+    'children': children.map((e) => e.toJson()).toList(),
+  };
+
+  factory DirectoryNode.fromJson(Map<String, dynamic> json) {
+    return DirectoryNode(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      absolutePath: json['absolutePath'] as String,
+      assignedPreset: json['assignedPreset'] != null 
+          ? PresetModel.fromJson(json['assignedPreset'] as Map<String, dynamic>) 
+          : null,
+      children: (json['children'] as List<dynamic>)
+          .map((e) => BatchNode.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -24,6 +25,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
   double _denoiseStrength = 0.0;
   double _splitPosition = 0.5; // 0.0 to 1.0 (50% default)
   Timer? _debounce;
+  bool _isCompilingScript = false;
 
   @override
   void initState() {
@@ -59,6 +61,8 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     // Debounce the script generation and player reload
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(milliseconds: 400), () async {
+      setState(() => _isCompilingScript = true);
+      
       // In a real app, videoPath comes from the selected BatchNode
       const dummyVideoPath = 'C:\\dummy\\video.mkv'; 
       try {
@@ -71,15 +75,32 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
         await _filteredPlayer.seek(currentPosition);
       } catch (e) {
         // Handle script generation errors
+      } finally {
+        if (mounted) setState(() => _isCompilingScript = false);
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Top Toolbar
+    return Focus(
+      autofocus: true,
+      onKeyEvent: (node, event) {
+        if (event.logicalKey == LogicalKeyboardKey.space && event is KeyDownEvent) {
+          if (_originalPlayer.state.playing) {
+            _originalPlayer.pause();
+            _filteredPlayer.pause();
+          } else {
+            _originalPlayer.play();
+            _filteredPlayer.play();
+          }
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Column(
+        children: [
+          // Top Toolbar
         Container(
           height: 48,
           color: const Color(0xFF141414),
@@ -170,6 +191,15 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
                               right: 16,
                               child: _buildLabel('DENOISED (KNLMeansCL)', Theme.of(context).colorScheme.primary),
                             ),
+                            
+                            // Loading Overlay
+                            if (_isCompilingScript)
+                              Container(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                child: const Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              ),
                           ],
                         ),
                       );
@@ -214,6 +244,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
           ),
         ),
       ],
+      ),
     );
   }
   

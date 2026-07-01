@@ -37,8 +37,7 @@ class Phase0BypassView extends ConsumerWidget {
               Row(
                 children: [
                   Expanded(
-                    child: _buildSelectionCard(
-                      context: context,
+                    child: _SelectionCard(
                       title: 'Film / Live Action',
                       description: 'Contains natural film grain or sensor noise.\nRequires Texture Lock (Phase 1).',
                       icon: Icons.camera_roll_rounded,
@@ -50,8 +49,7 @@ class Phase0BypassView extends ConsumerWidget {
                   ),
                   const SizedBox(width: 32),
                   Expanded(
-                    child: _buildSelectionCard(
-                      context: context,
+                    child: _SelectionCard(
                       title: 'Clean Digital / Animation',
                       description: 'No natural grain. Clean sharp lines.\nBypasses Texture Lock directly to Phase 2.',
                       icon: Icons.animation_rounded,
@@ -69,56 +67,87 @@ class Phase0BypassView extends ConsumerWidget {
       ),
     );
   }
+}
 
-  Widget _buildSelectionCard({
-    required BuildContext context,
-    required String title,
-    required String description,
-    required IconData icon,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(32),
-        decoration: BoxDecoration(
-          color: const Color(0xFF222222),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFF333333)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+class _SelectionCard extends StatefulWidget {
+  final String title;
+  final String description;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _SelectionCard({
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  State<_SelectionCard> createState() => _SelectionCardState();
+}
+
+class _SelectionCardState extends State<_SelectionCard> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.all(32),
+          transform: Matrix4.diagonal3Values(
+            _isHovered ? 1.02 : 1.0, 
+            _isHovered ? 1.02 : 1.0, 
+            1.0
+          ),
+          decoration: BoxDecoration(
+            color: _isHovered ? const Color(0xFF2A2A2A) : const Color(0xFF222222),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: _isHovered ? widget.color.withValues(alpha: 0.5) : const Color(0xFF333333),
+              width: _isHovered ? 2 : 1,
             ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Icon(icon, size: 64, color: color),
-            const SizedBox(height: 24),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: _isHovered ? widget.color.withValues(alpha: 0.15) : Colors.black.withValues(alpha: 0.2),
+                blurRadius: _isHovered ? 20 : 10,
+                offset: const Offset(0, 4),
               ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              description,
-              style: const TextStyle(
-                fontSize: 14,
-                color: Colors.white60,
-                height: 1.5,
+            ],
+          ),
+          child: Column(
+            children: [
+              Icon(widget.icon, size: 64, color: widget.color),
+              const SizedBox(height: 24),
+              Text(
+                widget.title,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
-            ),
-          ],
+              const SizedBox(height: 12),
+              Text(
+                widget.description,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.white60,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       ),
     );
