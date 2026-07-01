@@ -85,11 +85,22 @@ Designed for massive TV series workflows, utilizing a strict parent-child recurs
 
 Because this app relies on heavy CLI tools that are difficult for casual users to install manually, the architecture must support bundled dependencies.
 
-* **Portable Binaries:** The compiled Windows application must ship with a `/bin` directory containing portable, pre-compiled Windows binaries for:
-* `ffmpeg.exe` and `ffprobe.exe`
-* `Av1an.exe`
-* `SVT-AV1`
-* `mpv` (libmpv for the Flutter wrapper)
+* **Portable Binaries:** The compiled Windows application must rely on an `assets/bin/` directory containing portable, pre-compiled Windows binaries for:
+    * `ffmpeg.exe` and `ffprobe.exe`
+    * `av1an.exe`
+    * `SvtAv1EncApp.exe` (SVT-AV1-PSY version recommended)
+    * `mpv-2.dll` (libmpv from Shinchiro for the Flutter wrapper, specifically the `x86_64-v3` build for AVX2 performance)
 
+* **VapourSynth Portable Environment:** The app must include a portable Python environment (`assets/bin/python/python.exe`) with VapourSynth Portable and the `KNLMeansCL.dll` plugin (x64 version) pre-installed. The Flutter backend must explicitly route the Av1an command execution paths to utilize these bundled binaries rather than relying on the user's system PATH variables.
 
-* **VapourSynth Portable Environment:** The app must include a portable Python environment with VapourSynth and the `KNLMeansCL` plugin pre-installed. The Flutter backend must explicitly route the Av1an command execution paths to utilize these bundled binaries rather than relying on the user's system PATH variables.
+### **Automated Dependency Downloader (`setup_deps.ps1`)**
+
+To facilitate easy developer setup and user installations, the project includes a `setup_deps.ps1` PowerShell script that automatically:
+1. Queries the GitHub API to dynamically fetch the absolute latest release URLs for **Av1an** and **SVT-AV1-PSY**.
+2. Downloads and natively extracts the binaries into `assets/bin/`.
+3. Downloads the official **Python 3.11 Embeddable** and seamlessly overlays the **VapourSynth Portable** release on top of it inside `assets/bin/python/`.
+
+**Manual Steps Required After Script:**
+Due to licensing and distribution constraints, two `.dll` files must be downloaded and placed manually:
+1. **KNLMeansCL.dll (x64)**: Download the `win64` release from `https://github.com/Khanattila/KNLMeansCL/releases`, open the `x64` folder inside the zip, and place the `.dll` in `assets/bin/python/`.
+2. **mpv-2.dll (v3)**: Download the `mpv-dev-x86_64-v3` release from `https://sourceforge.net/projects/mpv-player-windows/files/libmpv/`. Extract it, find `libmpv-2.dll`, place it in `assets/bin/`, and **rename** it to `mpv-2.dll` (Flutter's media_kit specifically looks for this filename).
