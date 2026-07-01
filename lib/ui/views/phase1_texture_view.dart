@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../../services/vapoursynth_service.dart';
 import '../widgets/ez_panel.dart';
 import '../widgets/ez_slider.dart';
 
@@ -21,6 +23,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
   
   double _denoiseStrength = 0.0;
   double _splitPosition = 0.5; // 0.0 to 1.0 (50% default)
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -42,6 +45,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _originalPlayer.dispose();
     _filteredPlayer.dispose();
     super.dispose();
@@ -50,6 +54,24 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
   void _onDenoiseChanged(double value) {
     setState(() {
       _denoiseStrength = value;
+    });
+    
+    // Debounce the script generation and player reload
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () async {
+      // In a real app, videoPath comes from the selected BatchNode
+      const dummyVideoPath = 'C:\\dummy\\video.mkv'; 
+      try {
+        final scriptPath = await VapourSynthService.generateDenoiseScript(dummyVideoPath, _denoiseStrength);
+        
+        // Save current position to seamless seek after reload
+        final currentPosition = _originalPlayer.state.position;
+        
+        await _filteredPlayer.open(Media(scriptPath), play: true);
+        await _filteredPlayer.seek(currentPosition);
+      } catch (e) {
+        // Handle script generation errors
+      }
     });
   }
 

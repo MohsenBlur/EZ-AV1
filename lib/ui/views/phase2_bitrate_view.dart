@@ -35,6 +35,17 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       // In reality, this would load the encoded test chunks:
       // player.open(Media('path/to/test_chunk_$i.mkv'), play: false);
     }
+
+    // Master Clock Drift Enforcer
+    _players[0]?.stream.position.listen((masterPos) {
+      if (!_isPlaying) return;
+      for (int i = 1; i < 4; i++) {
+        final slavePos = _players[i]?.state.position ?? Duration.zero;
+        if ((masterPos - slavePos).inMilliseconds.abs() > 150) {
+          _players[i]?.seek(masterPos);
+        }
+      }
+    });
   }
 
   @override
