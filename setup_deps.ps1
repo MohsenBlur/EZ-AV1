@@ -38,8 +38,11 @@ if (-not (Test-Path $FfmpegExe) -or (Get-Item $FfmpegExe).Length -eq 0) {
 $Av1anZip = Join-Path $TargetDir "av1an.zip"
 $Av1anExe = Join-Path $TargetDir "av1an.exe"
 if (-not (Test-Path $Av1anExe) -or (Get-Item $Av1anExe).Length -eq 0) {
+    Write-Host "Fetching latest Av1an release URL..." -ForegroundColor Yellow
+    $Av1anRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/master-of-zen/Av1an/releases/latest"
+    $Av1anUrl = ($Av1anRelease.assets | Where-Object { $_.name -match "x86_64-pc-windows-msvc.zip" }).browser_download_url
     Write-Host "Downloading Av1an..." -ForegroundColor Yellow
-    Invoke-WebRequest -Uri "https://github.com/master-of-zen/Av1an/releases/download/0.4.1/av1an-x86_64-pc-windows-msvc.zip" -OutFile $Av1anZip
+    Invoke-WebRequest -Uri $Av1anUrl -OutFile $Av1anZip
     Write-Host "Extracting Av1an..." -ForegroundColor Yellow
     Expand-Archive -Path $Av1anZip -DestinationPath $TargetDir -Force
     Remove-Item $Av1anZip -Force
@@ -49,8 +52,11 @@ if (-not (Test-Path $Av1anExe) -or (Get-Item $Av1anExe).Length -eq 0) {
 $SvtZip = Join-Path $TargetDir "svt-av1.zip"
 $SvtExe = Join-Path $TargetDir "SvtAv1EncApp.exe"
 if (-not (Test-Path $SvtExe) -or (Get-Item $SvtExe).Length -eq 0) {
+    Write-Host "Fetching latest SVT-AV1 (PSY) release URL..." -ForegroundColor Yellow
+    $SvtRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/gianni-rosato/svt-av1-psy/releases/latest"
+    $SvtUrl = ($SvtRelease.assets | Where-Object { $_.name -match "SVT-AV1-PSY-Windows.zip" }).browser_download_url
     Write-Host "Downloading SVT-AV1 (PSY)..." -ForegroundColor Yellow
-    Invoke-WebRequest -Uri "https://github.com/gianni-rosato/svt-av1-psy/releases/download/v1.2.0/SVT-AV1-PSY-Windows.zip" -OutFile $SvtZip
+    Invoke-WebRequest -Uri $SvtUrl -OutFile $SvtZip
     Write-Host "Extracting SVT-AV1..." -ForegroundColor Yellow
     Expand-Archive -Path $SvtZip -DestinationPath $TargetDir -Force
     Remove-Item $SvtZip -Force
@@ -60,7 +66,7 @@ if (-not (Test-Path $SvtExe) -or (Get-Item $SvtExe).Length -eq 0) {
 $VsZip = Join-Path $TargetDir "vapoursynth.zip"
 $PythonDir = Join-Path $TargetDir "python"
 $PythonExe = Join-Path $PythonDir "python.exe"
-if (-not (Test-Path $PythonDir) -or (Test-Path $PythonExe -and (Get-Item $PythonExe).Length -eq 0)) {
+if (-not (Test-Path $PythonDir) -or ((Test-Path $PythonExe) -and ((Get-Item $PythonExe).Length -eq 0))) {
     Write-Host "Downloading VapourSynth Portable..." -ForegroundColor Yellow
     Invoke-WebRequest -Uri "https://github.com/vapoursynth/vapoursynth/releases/download/R65/VapourSynth64-Portable-R65.zip" -OutFile $VsZip
     Write-Host "Extracting VapourSynth..." -ForegroundColor Yellow
