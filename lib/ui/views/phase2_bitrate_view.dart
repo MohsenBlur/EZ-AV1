@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../../providers/execution_provider.dart';
+import '../../providers/navigation_provider.dart';
 import '../widgets/ez_panel.dart';
 
 class Phase2BitrateView extends ConsumerStatefulWidget {
@@ -78,6 +80,43 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
 
   @override
   Widget build(BuildContext context) {
+    // Watch execution state for resource suspension
+    final isRendering = ref.watch(executionProvider.select((s) => s.isRunning));
+
+    if (isRendering) {
+      return Container(
+        color: const Color(0xFF0F0F0F),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.rocket_launch_rounded, size: 64, color: Colors.orangeAccent),
+              const SizedBox(height: 24),
+              const Text(
+                'Playback Suspended',
+                style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'System resources are fully dedicated to the Av1an batch render.',
+                style: TextStyle(color: Colors.white60, fontSize: 14),
+              ),
+              const SizedBox(height: 32),
+              OutlinedButton.icon(
+                onPressed: () => ref.read(selectedTabProvider.notifier).setTab(3),
+                icon: const Icon(Icons.visibility_rounded),
+                label: const Text('View Render Progress'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.orangeAccent,
+                  side: const BorderSide(color: Colors.orangeAccent),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Focus(
       autofocus: true,
       onKeyEvent: (node, event) {

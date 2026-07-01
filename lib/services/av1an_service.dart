@@ -24,6 +24,7 @@ class Av1anService {
     required String outputVideo,
     required PresetModel preset,
     bool isChunkTest = false,
+    int? workers,
   }) {
     final args = <String>[];
     
@@ -58,6 +59,11 @@ class Av1anService {
 
     // Optional Av1an features
     args.addAll(['--resume', '--split-method', 'pyscenedetect']);
+
+    // Low Spec Mode (Sequential workers)
+    if (workers != null) {
+      args.addAll(['--workers', '$workers']);
+    }
 
     // Output
     args.addAll(['-o', '"$outputVideo"']);

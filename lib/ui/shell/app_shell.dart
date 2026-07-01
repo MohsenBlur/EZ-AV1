@@ -4,6 +4,7 @@ import '../../providers/navigation_provider.dart';
 import '../views/phase0_bypass_view.dart';
 import '../views/phase1_texture_view.dart';
 import '../views/phase2_bitrate_view.dart';
+import '../views/phase3_execution_view.dart';
 
 class AppShell extends ConsumerWidget {
   const AppShell({super.key});
@@ -40,12 +41,18 @@ class AppShell extends ConsumerWidget {
                   isSelected: selectedIndex == 2,
                   onTap: () => ref.read(selectedTabProvider.notifier).setTab(2),
                 ),
+                _SidebarIcon(
+                  icon: Icons.rocket_launch_rounded,
+                  label: 'Render',
+                  isSelected: selectedIndex == 3,
+                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(3),
+                ),
                 const Spacer(),
                 _SidebarIcon(
                   icon: Icons.settings_rounded,
                   label: 'Settings',
-                  isSelected: selectedIndex == 3,
-                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(3),
+                  isSelected: selectedIndex == 4,
+                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(4),
                 ),
                 const SizedBox(height: 20),
               ],
@@ -102,6 +109,8 @@ class AppShell extends ConsumerWidget {
       case 2:
         return const Phase2BitrateView();
       case 3:
+        return const Phase3ExecutionView();
+      case 4:
         return const Center(child: Text('Settings View'));
       default:
         return const SizedBox.shrink();
