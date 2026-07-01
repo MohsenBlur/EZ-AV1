@@ -44,7 +44,7 @@ class EnvironmentService {
       av1anPath,
       svtAv1Path,
       p.join(binDirectory, 'mpv-2.dll'),
-      p.join(binDirectory, 'vapoursynth.dll'),
+      p.join(pythonDirectory, 'vapoursynth.dll'),
     ];
 
     for (final path in requiredBinaries) {

@@ -1,12 +1,9 @@
-$r = Invoke-RestMethod -Uri 'https://api.github.com/repos/psy-ex/svt-av1-psy/releases'
-foreach ($release in $r) {
-    $asset = $release.assets | Where-Object { $_.name -match 'Windows' }
-    if ($asset) {
-        $url = $asset.browser_download_url
-        break
-    }
-}
-Write-Host "URL: $url"
-Invoke-WebRequest -Uri $url -OutFile 'test_svt.7z'
-.\assets\bin\7zr.exe x test_svt.7z -otest_svt -y
-Get-ChildItem -Path test_svt -Recurse | Select-Object Name, Length
+if (Test-Path assets\bin\SvtAv1EncApp.exe) { Remove-Item assets\bin\SvtAv1EncApp.exe -Force }
+$SvtZip = 'assets\bin\svt-av1.7z'
+$SevenZipExe = 'assets\bin\7zr.exe'
+Invoke-WebRequest -Uri 'https://github.com/psy-ex/svt-av1-psy/releases/download/v2.2.0/SvtAv1EncApp-Windows-x86_64.7z' -OutFile $SvtZip
+& $SevenZipExe x $SvtZip -o"assets\bin" -y | Out-Null
+
+Get-ChildItem -Path "assets\bin" -Filter "SvtAv1EncApp.exe" -Recurse | Move-Item -Destination "assets\bin" -Force
+
+Get-ChildItem "assets\bin\SvtAv1EncApp.exe" | Select-Object Name, Length
