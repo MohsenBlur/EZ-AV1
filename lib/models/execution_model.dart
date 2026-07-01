@@ -20,7 +20,7 @@ abstract class ExecutionJob with _$ExecutionJob {
     @Default(0.0) double progress, // 0.0 to 1.0
     @Default(0.0) double fps,
     @Default('--:--:--') String eta,
-    @Default('') String logOutput,
+    @Default([]) List<String> logLines,
     String? errorMessage,
   }) = _ExecutionJob;
 }

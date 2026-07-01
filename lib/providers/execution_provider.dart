@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -77,8 +78,16 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
     }
     extractFiles(nodes);
 
-    final jobs = files.map((f) => ExecutionJob(id: f.id, node: f)).toList();
-    state = state.copyWith(jobs: jobs);
+    // Smart Merge: Retain existing state for known IDs
+    final existingJobs = {for (var j in state.jobs) j.id: j};
+    final newJobs = files.map((f) {
+      if (existingJobs.containsKey(f.id)) {
+        return existingJobs[f.id]!.copyWith(node: f); // Update node but keep status/logs
+      }
+      return ExecutionJob(id: f.id, node: f);
+    }).toList();
+
+    state = state.copyWith(jobs: newJobs);
   }
 
   Future<void> startBatch() async {
@@ -105,9 +114,13 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
     
     if (_activeProcess != null) {
       // Aggressively kill the process tree in Windows
-      try {
-        await Process.run('taskkill', ['/F', '/T', '/PID', _activeProcess!.pid.toString()]);
-      } catch (e) {
+      if (Platform.isWindows) {
+        try {
+          await Process.run('taskkill', ['/F', '/T', '/PID', _activeProcess!.pid.toString()]);
+        } catch (e) {
+          _activeProcess!.kill();
+        }
+      } else {
         _activeProcess!.kill();
       }
       _activeProcess = null;
@@ -172,21 +185,24 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
             double? fps = fpsMatch != null ? double.tryParse(fpsMatch.group(1)!) : null;
             String? eta = etaMatch?.group(1);
 
+            final newLines = List<String>.from(j.logLines)..add(data);
+            if (newLines.length > 200) {
+              newLines.removeAt(0); // Keep buffer capped at 200 lines
+            }
+
             return j.copyWith(
               progress: progress != null ? (progress / 100.0) : j.progress,
               fps: fps ?? j.fps,
               eta: eta ?? j.eta,
-              logOutput: j.logOutput.length > 5000 
-                  ? '${j.logOutput.substring(j.logOutput.length - 2000)}\n$data' // Circular buffer
-                  : '${j.logOutput}\n$data'
+              logLines: newLines,
             );
           });
           watch.reset();
         }
       }
 
-      _stdoutSub = _activeProcess!.stdout.transform(SystemEncoding().decoder).listen(handleLog);
-      _stderrSub = _activeProcess!.stderr.transform(SystemEncoding().decoder).listen(handleLog);
+      _stdoutSub = _activeProcess!.stdout.transform(const Utf8Decoder(allowMalformed: true)).listen(handleLog);
+      _stderrSub = _activeProcess!.stderr.transform(const Utf8Decoder(allowMalformed: true)).listen(handleLog);
 
       final exitCode = await _activeProcess!.exitCode;
 

@@ -11,10 +11,11 @@ class Phase3ExecutionView extends ConsumerWidget {
     final executionState = ref.watch(executionProvider);
     final notifier = ref.read(executionProvider.notifier);
 
-    final totalJobs = executionState.jobs.length;
-    final completedJobs = executionState.jobs.where((j) => j.status == JobStatus.done).length;
+    final validJobs = executionState.jobs.where((j) => j.status != JobStatus.error).toList();
+    final totalJobs = validJobs.length;
+    final completedJobs = validJobs.where((j) => j.status == JobStatus.done).length;
     final totalProgress = totalJobs > 0 
-        ? executionState.jobs.fold<double>(0, (sum, j) => sum + j.progress) / totalJobs 
+        ? validJobs.fold<double>(0, (sum, j) => sum + j.progress) / totalJobs 
         : 0.0;
 
     return Column(
@@ -221,7 +222,7 @@ class _JobCardState extends State<_JobCard> {
                 borderRadius: BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
               ),
               child: SelectableText(
-                j.errorMessage ?? (j.logOutput.isEmpty ? 'No logs available.' : j.logOutput),
+                j.errorMessage ?? (j.logLines.isEmpty ? 'No logs available.' : j.logLines.join('\n')),
                 style: const TextStyle(
                   fontFamily: 'Courier',
                   fontSize: 11,
