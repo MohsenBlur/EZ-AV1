@@ -169,42 +169,62 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
       );
 
       final watch = Stopwatch()..start();
+      double? latestProgress;
+      double? latestFps;
+      String? latestEta;
+      List<String> pendingLogs = [];
 
       void handleLog(String data) {
         // Regex for standard Av1an stderr: [12/100] 12.0% | 2.1 fps | ETA: 00:15:30
-        // We will do a generic parse for % and fps
-        
         final percentMatch = RegExp(r'(\d+\.\d+)%').firstMatch(data);
         final fpsMatch = RegExp(r'(\d+\.\d+)\s*fps').firstMatch(data);
         final etaMatch = RegExp(r'ETA:\s*([0-9:]+)').firstMatch(data);
 
-        // Throttle UI updates to roughly every 250ms
+        if (percentMatch != null) latestProgress = double.tryParse(percentMatch.group(1)!);
+        if (fpsMatch != null) latestFps = double.tryParse(fpsMatch.group(1)!);
+        if (etaMatch != null) latestEta = etaMatch.group(1);
+
+        pendingLogs.add(data);
+
+        // Throttle UI updates to roughly every 250ms without losing logs
         if (watch.elapsedMilliseconds > 250) {
           _updateJob(jobId, (j) {
-            double? progress = percentMatch != null ? double.tryParse(percentMatch.group(1)!) : null;
-            double? fps = fpsMatch != null ? double.tryParse(fpsMatch.group(1)!) : null;
-            String? eta = etaMatch?.group(1);
-
-            final newLines = List<String>.from(j.logLines)..add(data);
+            final newLines = List<String>.from(j.logLines)..addAll(pendingLogs);
             if (newLines.length > 200) {
-              newLines.removeAt(0); // Keep buffer capped at 200 lines
+              newLines.removeRange(0, newLines.length - 200); // Keep buffer capped at 200 lines
             }
 
             return j.copyWith(
-              progress: progress != null ? (progress / 100.0) : j.progress,
-              fps: fps ?? j.fps,
-              eta: eta ?? j.eta,
+              progress: latestProgress != null ? (latestProgress! / 100.0) : j.progress,
+              fps: latestFps ?? j.fps,
+              eta: latestEta ?? j.eta,
               logLines: newLines,
             );
           });
+          pendingLogs.clear();
           watch.reset();
         }
       }
 
-      _stdoutSub = _activeProcess!.stdout.transform(const Utf8Decoder(allowMalformed: true)).listen(handleLog);
-      _stderrSub = _activeProcess!.stderr.transform(const Utf8Decoder(allowMalformed: true)).listen(handleLog);
+      _stdoutSub = _activeProcess!.stdout
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .transform(const LineSplitter())
+          .listen(handleLog);
+      _stderrSub = _activeProcess!.stderr
+          .transform(const Utf8Decoder(allowMalformed: true))
+          .transform(const LineSplitter())
+          .listen(handleLog);
 
       final exitCode = await _activeProcess!.exitCode;
+
+      // Flush any remaining logs that were caught in the throttle buffer
+      if (pendingLogs.isNotEmpty) {
+        _updateJob(jobId, (j) {
+          final newLines = List<String>.from(j.logLines)..addAll(pendingLogs);
+          if (newLines.length > 200) newLines.removeRange(0, newLines.length - 200);
+          return j.copyWith(logLines: newLines);
+        });
+      }
 
       if (exitCode == 0) {
         _updateJob(jobId, (j) => j.copyWith(status: JobStatus.done, progress: 1.0));
