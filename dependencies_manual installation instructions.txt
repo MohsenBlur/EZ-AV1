@@ -1,0 +1,30 @@
+================================================================================
+REQUIRED DEPENDENCIES FOR EZ-AV1
+================================================================================
+Please download the following portable binaries and extract them directly into
+the 'assets\bin' folder in the root of the EZ-AV1 project.
+
+1. FFmpeg & FFprobe (Windows Portable)
+   - Download from: https://github.com/GyanD/codexffmpeg/releases
+   - Ensure
+            fmpeg.exe and
+                          fprobe.exe are in assets\bin
+
+2. Av1an
+   - Download the latest Windows release from: https://github.com/master-of-zen/Av1an/releases
+   - Ensure v1an.exe is in assets\bin
+
+3. SVT-AV1
+   - Download the Windows binary from: https://gitlab.com/AOMediaCodec/SVT-AV1/-/releases
+   - Ensure SvtAv1EncApp.exe is in assets\bin
+
+4. Shinchiro MPV (with VapourSynth support)
+   - Download from: https://sourceforge.net/projects/mpv-player-windows/files/
+   - Ensure mpv.exe and mpv-2.dll are in assets\bin
+   - NOTE: We will copy this mpv-2.dll over the media_kit one during runtime.
+
+5. Portable Python & VapourSynth
+   - Install VapourSynth Portable (which includes Python)
+   - Ensure the python executable is at $TargetDir\python\python.exe
+   - Install KNLMeansCL plugin into the VapourSynth environment.
+================================================================================

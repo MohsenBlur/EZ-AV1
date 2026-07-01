@@ -7,68 +7,71 @@ if (-not (Test-Path -Path $TargetDir)) {
     New-Item -ItemType Directory -Path $TargetDir | Out-Null
 }
 
-Write-Host "Setting up EZ-AV1 dependencies in $TargetDir..."
+$ProgressPreference = 'SilentlyContinue' # Speeds up Invoke-WebRequest significantly
 
-# This script creates the folder structure for the portable binaries.
-# Due to the complexity of VapourSynth portable environments and the varying
-# release structures of these tools, we recommend downloading the specific builds:
+Write-Host "=================================================" -ForegroundColor Cyan
+Write-Host " AUTOMATED DEPENDENCY DOWNLOADER FOR EZ-AV1" -ForegroundColor Cyan
+Write-Host "=================================================" -ForegroundColor Cyan
 
-$Instructions = @"
-
-================================================================================
-REQUIRED DEPENDENCIES FOR EZ-AV1
-================================================================================
-Please download the following portable binaries and extract them directly into 
-the '$TargetDir' folder in the root of the EZ-AV1 project.
-
-1. FFmpeg & FFprobe (Windows Portable)
-   - Download from: https://github.com/GyanD/codexffmpeg/releases
-   - Ensure `ffmpeg.exe` and `ffprobe.exe` are in $TargetDir
-
-2. Av1an
-   - Download the latest Windows release from: https://github.com/master-of-zen/Av1an/releases
-   - Ensure `av1an.exe` is in $TargetDir
-
-3. SVT-AV1
-   - Download the Windows binary from: https://gitlab.com/AOMediaCodec/SVT-AV1/-/releases
-   - Ensure `SvtAv1EncApp.exe` is in $TargetDir
-
-4. Shinchiro MPV (with VapourSynth support)
-   - Download from: https://sourceforge.net/projects/mpv-player-windows/files/
-   - Ensure `mpv.exe` and `mpv-2.dll` are in $TargetDir
-   - NOTE: We will copy this mpv-2.dll over the media_kit one during runtime.
-
-5. Portable Python & VapourSynth
-   - Install VapourSynth Portable (which includes Python) 
-   - Ensure the python executable is at `$TargetDir\python\python.exe`
-   - Install KNLMeansCL plugin into the VapourSynth environment.
-================================================================================
-"@
-
-Write-Host $Instructions -ForegroundColor Cyan
-
-# Create dummy files for UI development/testing so the EnvironmentService doesn't crash
-$Dummies = @(
-    "ffmpeg.exe", "ffprobe.exe", "av1an.exe", "SvtAv1EncApp.exe", "mpv-2.dll"
-)
-
-foreach ($dummy in $Dummies) {
-    $path = Join-Path $TargetDir $dummy
-    if (-not (Test-Path $path)) {
-        New-Item -ItemType File -Path $path -Force | Out-Null
-        Write-Host "Created placeholder for $dummy" -ForegroundColor Yellow
-    }
+# 0. Download 7-Zip standalone to extract .7z files
+$SevenZipExe = Join-Path $TargetDir "7zr.exe"
+if (-not (Test-Path $SevenZipExe)) {
+    Write-Host "Downloading 7-Zip Standalone..." -ForegroundColor Yellow
+    Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile $SevenZipExe
 }
 
-# Create dummy python
+# 1. FFmpeg
+$FfmpegZip = Join-Path $TargetDir "ffmpeg.zip"
+$FfmpegExe = Join-Path $TargetDir "ffmpeg.exe"
+if (-not (Test-Path $FfmpegExe) -or (Get-Item $FfmpegExe).Length -eq 0) {
+    Write-Host "Downloading FFmpeg..." -ForegroundColor Yellow
+    Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $FfmpegZip
+    Write-Host "Extracting FFmpeg..." -ForegroundColor Yellow
+    Expand-Archive -Path $FfmpegZip -DestinationPath $TargetDir -Force
+    # Move binaries to root of bin
+    Get-ChildItem -Path $TargetDir -Filter "ffmpeg.exe" -Recurse | Move-Item -Destination $TargetDir -Force
+    Get-ChildItem -Path $TargetDir -Filter "ffprobe.exe" -Recurse | Move-Item -Destination $TargetDir -Force
+    Remove-Item $FfmpegZip -Force
+}
+
+# 2. Av1an
+$Av1anZip = Join-Path $TargetDir "av1an.zip"
+$Av1anExe = Join-Path $TargetDir "av1an.exe"
+if (-not (Test-Path $Av1anExe) -or (Get-Item $Av1anExe).Length -eq 0) {
+    Write-Host "Downloading Av1an..." -ForegroundColor Yellow
+    Invoke-WebRequest -Uri "https://github.com/master-of-zen/Av1an/releases/download/0.4.1/av1an-x86_64-pc-windows-msvc.zip" -OutFile $Av1anZip
+    Write-Host "Extracting Av1an..." -ForegroundColor Yellow
+    Expand-Archive -Path $Av1anZip -DestinationPath $TargetDir -Force
+    Remove-Item $Av1anZip -Force
+}
+
+# 3. SVT-AV1
+$SvtZip = Join-Path $TargetDir "svt-av1.zip"
+$SvtExe = Join-Path $TargetDir "SvtAv1EncApp.exe"
+if (-not (Test-Path $SvtExe) -or (Get-Item $SvtExe).Length -eq 0) {
+    Write-Host "Downloading SVT-AV1 (PSY)..." -ForegroundColor Yellow
+    Invoke-WebRequest -Uri "https://github.com/gianni-rosato/svt-av1-psy/releases/download/v1.2.0/SVT-AV1-PSY-Windows.zip" -OutFile $SvtZip
+    Write-Host "Extracting SVT-AV1..." -ForegroundColor Yellow
+    Expand-Archive -Path $SvtZip -DestinationPath $TargetDir -Force
+    Remove-Item $SvtZip -Force
+}
+
+# 4. VapourSynth Portable
+$VsZip = Join-Path $TargetDir "vapoursynth.zip"
 $PythonDir = Join-Path $TargetDir "python"
-if (-not (Test-Path $PythonDir)) {
-    New-Item -ItemType Directory -Path $PythonDir | Out-Null
-}
 $PythonExe = Join-Path $PythonDir "python.exe"
-if (-not (Test-Path $PythonExe)) {
-    New-Item -ItemType File -Path $PythonExe -Force | Out-Null
-    Write-Host "Created placeholder for python.exe" -ForegroundColor Yellow
+if (-not (Test-Path $PythonDir) -or (Test-Path $PythonExe -and (Get-Item $PythonExe).Length -eq 0)) {
+    Write-Host "Downloading VapourSynth Portable..." -ForegroundColor Yellow
+    Invoke-WebRequest -Uri "https://github.com/vapoursynth/vapoursynth/releases/download/R65/VapourSynth64-Portable-R65.zip" -OutFile $VsZip
+    Write-Host "Extracting VapourSynth..." -ForegroundColor Yellow
+    # Extract directly to the python/ root folder as expected by the environment service
+    Expand-Archive -Path $VsZip -DestinationPath $PythonDir -Force
+    Remove-Item $VsZip -Force
 }
 
-Write-Host "Done. Replace the placeholder 0-byte files with real binaries before running a real encode." -ForegroundColor Green
+Write-Host "=================================================" -ForegroundColor Green
+Write-Host " IMPORTANT MANUAL STEPS REMAINING:" -ForegroundColor Yellow
+Write-Host "=================================================" -ForegroundColor Green
+Write-Host "1. VapourSynth's KNLMeansCL plugin is not bundled by default. You need to install it manually into the python directory."
+Write-Host "2. Shinchiro MPV (mpv-2.dll) links change weekly. Please download 'mpv-dev-x86_64' from https://sourceforge.net/projects/mpv-player-windows/files/libmpv/ and place 'mpv-2.dll' inside $TargetDir."
+Write-Host "=================================================" -ForegroundColor Cyan
