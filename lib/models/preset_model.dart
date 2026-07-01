@@ -4,7 +4,7 @@ part 'preset_model.freezed.dart';
 part 'preset_model.g.dart';
 
 @freezed
-class PresetModel with _$PresetModel {
+abstract class PresetModel with _$PresetModel {
   const factory PresetModel({
     required String id,
     required String name,

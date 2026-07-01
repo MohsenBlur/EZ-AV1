@@ -48,7 +48,7 @@ class EnvironmentService {
     if (currentPath.contains(pythonDirectory)) return;
 
     // Prepend the portable python/bin directories to the PATH
-    final newPath = '$pythonDirectory;$binDirectory;$currentPath';
+    // final newPath = '$pythonDirectory;$binDirectory;$currentPath';
     
     // Note: Dart doesn't have a built-in way to set environment variables 
     // for the CURRENT process that propagate natively to loaded DLLs perfectly

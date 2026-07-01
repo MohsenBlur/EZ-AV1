@@ -5,12 +5,13 @@ import '../models/batch_node_model.dart';
 import '../models/preset_model.dart';
 import 'package:path/path.dart' as p;
 
-final batchQueueProvider = StateNotifierProvider<BatchQueueNotifier, List<BatchNode>>((ref) {
+final batchQueueProvider = NotifierProvider<BatchQueueNotifier, List<BatchNode>>(() {
   return BatchQueueNotifier();
 });
 
-class BatchQueueNotifier extends StateNotifier<List<BatchNode>> {
-  BatchQueueNotifier() : super([]);
+class BatchQueueNotifier extends Notifier<List<BatchNode>> {
+  @override
+  List<BatchNode> build() => [];
   final _uuid = const Uuid();
 
   /// Recursively parses a directory from disk and loads it into the queue.
