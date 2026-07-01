@@ -46,7 +46,40 @@ class Phase3ExecutionView extends ConsumerWidget {
               Container(width: 1, height: 24, color: Colors.white24),
               const SizedBox(width: 16),
               ElevatedButton.icon(
-                onPressed: executionState.isRunning ? null : () => notifier.startBatch(),
+                onPressed: executionState.isRunning 
+                    ? null 
+                    : () {
+                        final existing = notifier.getExistingOutputFiles();
+                        if (existing.isEmpty) {
+                          notifier.startBatch();
+                        } else {
+                          showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              backgroundColor: const Color(0xFF181818),
+                              title: const Text('Overwrite Files?', style: TextStyle(color: Colors.white)),
+                              content: Text(
+                                '${existing.length} output file(s) already exist. Do you want to safely overwrite them before encoding?',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(),
+                                  child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                    notifier.startBatch(overwriteFiles: true);
+                                  },
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+                                  child: const Text('Overwrite & Render', style: TextStyle(color: Colors.white)),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                      },
                 icon: const Icon(Icons.play_arrow_rounded),
                 label: const Text('Start Render'),
                 style: ElevatedButton.styleFrom(

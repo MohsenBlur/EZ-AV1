@@ -17,12 +17,14 @@ class ExecutionState {
   final List<ExecutionJob> jobs;
   final bool isRunning;
   final bool lowSpecMode;
+  final bool overwriteFiles;
   final String? activeJobId;
   
   ExecutionState({
     this.jobs = const [],
     this.isRunning = false,
     this.lowSpecMode = false,
+    this.overwriteFiles = false,
     this.activeJobId,
   });
 
@@ -30,12 +32,14 @@ class ExecutionState {
     List<ExecutionJob>? jobs,
     bool? isRunning,
     bool? lowSpecMode,
+    bool? overwriteFiles,
     String? activeJobId,
   }) {
     return ExecutionState(
       jobs: jobs ?? this.jobs,
       isRunning: isRunning ?? this.isRunning,
       lowSpecMode: lowSpecMode ?? this.lowSpecMode,
+      overwriteFiles: overwriteFiles ?? this.overwriteFiles,
       activeJobId: activeJobId ?? this.activeJobId,
     );
   }
@@ -90,11 +94,24 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
     state = state.copyWith(jobs: newJobs);
   }
 
-  Future<void> startBatch() async {
+  List<String> getExistingOutputFiles() {
+    final existing = <String>[];
+    for (final job in state.jobs) {
+      if (job.status == JobStatus.done) continue;
+      final fileNode = job.node as FileNode;
+      final outputVideo = p.join(p.dirname(fileNode.absolutePath), '${p.basenameWithoutExtension(fileNode.name)}_av1.mkv');
+      if (File(outputVideo).existsSync()) {
+        existing.add(outputVideo);
+      }
+    }
+    return existing;
+  }
+
+  Future<void> startBatch({bool overwriteFiles = false}) async {
     if (state.isRunning) return;
     if (state.jobs.isEmpty) return;
 
-    state = state.copyWith(isRunning: true);
+    state = state.copyWith(isRunning: true, overwriteFiles: overwriteFiles);
     
     // Execution Loop
     for (int i = 0; i < state.jobs.length; i++) {
@@ -153,6 +170,19 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
 
     // Determine output path (e.g. adjacent to original)
     final outputVideo = p.join(p.dirname(fileNode.absolutePath), '${p.basenameWithoutExtension(fileNode.name)}_av1.mkv');
+
+    // Pre-flight file deletion to prevent Av1an hanging on overwrite prompts
+    if (state.overwriteFiles) {
+      final outFile = File(outputVideo);
+      if (outFile.existsSync()) {
+        try {
+          outFile.deleteSync();
+        } catch (e) {
+          _updateJob(jobId, (j) => j.copyWith(status: JobStatus.error, errorMessage: 'Failed to overwrite existing file: $e'));
+          return;
+        }
+      }
+    }
 
     final args = Av1anService.buildArgs(
       sourceVideo: fileNode.absolutePath,

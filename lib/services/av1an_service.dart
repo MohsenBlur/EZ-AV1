@@ -28,8 +28,8 @@ class Av1anService {
   }) {
     final args = <String>[];
     
-    // Properly quote input path to avoid shell escaping issues
-    args.addAll(['-i', '"$sourceVideo"']);
+    // Dart's Process.start naturally escapes arguments. Do not manually wrap in quotes.
+    args.addAll(['-i', sourceVideo]);
     
     // SVT-AV1 encoder flags
     final photonNoise = calculatePhotonNoise(preset.denoiseStrength);
@@ -45,8 +45,8 @@ class Av1anService {
     }
 
     args.add('-v');
-    // For Av1an, we pass encoder parameters as a single quoted string to the -v flag
-    args.add('"${videoParams.join(' ')}"');
+    // Pass encoder parameters without manual quote wrapping
+    args.add(videoParams.join(' '));
 
     // Audio / Metadata flags
     final audioFlags = <String>['-c:s', 'copy', '-c:a', 'libopus', '-b:a', '${preset.audioBitrate}k'];
@@ -55,7 +55,7 @@ class Av1anService {
     }
     
     args.add('-f');
-    args.add('"${audioFlags.join(' ')}"');
+    args.add(audioFlags.join(' '));
 
     // Optional Av1an features
     args.addAll(['--resume', '--split-method', 'pyscenedetect']);
@@ -66,7 +66,7 @@ class Av1anService {
     }
 
     // Output
-    args.addAll(['-o', '"$outputVideo"']);
+    args.addAll(['-o', outputVideo]);
 
     return args;
   }
