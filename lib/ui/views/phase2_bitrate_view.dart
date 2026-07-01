@@ -22,6 +22,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   final List<double> _vmafTargets = [91.0, 93.0, 95.0, 97.0];
   int _selectedTargetIndex = 2; // Default to 95.0
   bool _isPlaying = true;
+  bool _smartReveal = false;
 
   @override
   void initState() {
@@ -68,6 +69,15 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
         player.play();
       } else {
         player.pause();
+      }
+    }
+  }
+
+  void _toggleSmartReveal(bool value) {
+    setState(() => _smartReveal = value);
+    for (var player in _players.values) {
+      if (player.platform is NativePlayer) {
+        (player.platform as NativePlayer).setProperty('vd-lavc-film-grain', value ? 'no' : 'auto');
       }
     }
   }
@@ -144,6 +154,20 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                 ),
               ),
               const Spacer(),
+              Row(
+                children: [
+                  const Text('Smart Reveal (Bypass Grain)', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(width: 8),
+                  Switch(
+                    value: _smartReveal,
+                    onChanged: _toggleSmartReveal,
+                    activeThumbColor: Colors.blueAccent,
+                  ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Container(width: 1, height: 24, color: Colors.white24),
+              const SizedBox(width: 16),
               ElevatedButton.icon(
                 onPressed: () {
                   // TODO: Save preset and Queue for Batch
