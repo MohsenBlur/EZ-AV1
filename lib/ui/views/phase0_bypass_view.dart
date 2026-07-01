@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../providers/workflow_provider.dart';
+import '../../providers/navigation_provider.dart';
+
 class Phase0BypassView extends ConsumerWidget {
   const Phase0BypassView({super.key});
 
@@ -43,7 +46,8 @@ class Phase0BypassView extends ConsumerWidget {
                       icon: Icons.camera_roll_rounded,
                       color: Theme.of(context).colorScheme.primary,
                       onTap: () {
-                        // TODO: Update preset and navigate to Phase 1
+                        ref.read(workflowProvider.notifier).setSourceType(SourceType.film);
+                        ref.read(selectedTabProvider.notifier).setTab(2); // Jump to Texture
                       },
                     ),
                   ),
@@ -55,7 +59,8 @@ class Phase0BypassView extends ConsumerWidget {
                       icon: Icons.animation_rounded,
                       color: Colors.blueAccent,
                       onTap: () {
-                        // TODO: Update preset (denoise=0, grain=0) and navigate to Phase 2
+                        ref.read(workflowProvider.notifier).setSourceType(SourceType.clean);
+                        ref.read(selectedTabProvider.notifier).setTab(3); // Jump to Bitrate
                       },
                     ),
                   ),

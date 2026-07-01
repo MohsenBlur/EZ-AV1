@@ -5,6 +5,8 @@ import '../views/phase0_bypass_view.dart';
 import '../views/phase1_texture_view.dart';
 import '../views/phase2_bitrate_view.dart';
 import '../views/phase3_execution_view.dart';
+import '../views/file_import_view.dart';
+import '../../providers/workflow_provider.dart';
 
 class AppShell extends ConsumerWidget {
   const AppShell({super.key});
@@ -12,6 +14,8 @@ class AppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selectedIndex = ref.watch(selectedTabProvider);
+    ref.watch(workflowProvider); // trigger rebuilds on state change
+    final workflowNotifier = ref.read(workflowProvider.notifier);
 
     return Scaffold(
       body: Row(
@@ -24,35 +28,47 @@ class AppShell extends ConsumerWidget {
               children: [
                 const SizedBox(height: 20),
                 _SidebarIcon(
-                  icon: Icons.list_alt_rounded,
-                  label: 'Batch',
+                  icon: Icons.drive_folder_upload_rounded,
+                  label: 'Import',
                   isSelected: selectedIndex == 0,
+                  isLocked: !workflowNotifier.isTabUnlocked(0),
                   onTap: () => ref.read(selectedTabProvider.notifier).setTab(0),
+                ),
+                _SidebarIcon(
+                  icon: Icons.list_alt_rounded,
+                  label: 'Source',
+                  isSelected: selectedIndex == 1,
+                  isLocked: !workflowNotifier.isTabUnlocked(1),
+                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(1),
                 ),
                 _SidebarIcon(
                   icon: Icons.compare_arrows_rounded,
                   label: 'Texture',
-                  isSelected: selectedIndex == 1,
-                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(1),
+                  isSelected: selectedIndex == 2,
+                  isLocked: !workflowNotifier.isTabUnlocked(2),
+                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(2),
                 ),
                 _SidebarIcon(
                   icon: Icons.speed_rounded,
                   label: 'Bitrate',
-                  isSelected: selectedIndex == 2,
-                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(2),
+                  isSelected: selectedIndex == 3,
+                  isLocked: !workflowNotifier.isTabUnlocked(3),
+                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(3),
                 ),
                 _SidebarIcon(
                   icon: Icons.rocket_launch_rounded,
                   label: 'Render',
-                  isSelected: selectedIndex == 3,
-                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(3),
+                  isSelected: selectedIndex == 4,
+                  isLocked: !workflowNotifier.isTabUnlocked(4),
+                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(4),
                 ),
                 const Spacer(),
                 _SidebarIcon(
                   icon: Icons.settings_rounded,
                   label: 'Settings',
-                  isSelected: selectedIndex == 4,
-                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(4),
+                  isSelected: selectedIndex == 5,
+                  isLocked: false,
+                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(5),
                 ),
                 const SizedBox(height: 20),
               ],
@@ -103,14 +119,16 @@ class AppShell extends ConsumerWidget {
   Widget _buildContent(int index) {
     switch (index) {
       case 0:
-        return const Phase0BypassView();
+        return const FileImportView();
       case 1:
-        return const Phase1TextureView();
+        return const Phase0BypassView();
       case 2:
-        return const Phase2BitrateView();
+        return const Phase1TextureView();
       case 3:
-        return const Phase3ExecutionView();
+        return const Phase2BitrateView();
       case 4:
+        return const Phase3ExecutionView();
+      case 5:
         return const Center(child: Text('Settings View'));
       default:
         return const SizedBox.shrink();
@@ -122,12 +140,14 @@ class _SidebarIcon extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool isSelected;
+  final bool isLocked;
   final VoidCallback onTap;
 
   const _SidebarIcon({
     required this.icon,
     required this.label,
     required this.isSelected,
+    this.isLocked = false,
     required this.onTap,
   });
 
@@ -136,32 +156,49 @@ class _SidebarIcon extends StatelessWidget {
     final activeColor = Theme.of(context).colorScheme.primary;
     final color = isSelected ? activeColor : Colors.grey[600];
     
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        width: 64,
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        decoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(
-              color: isSelected ? activeColor : Colors.transparent,
-              width: 3,
-            ),
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 10,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+    return IgnorePointer(
+      ignoring: isLocked,
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: isLocked ? 0.3 : 1.0,
+        child: InkWell(
+          onTap: isLocked ? null : onTap,
+          child: Container(
+            width: 64,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            decoration: BoxDecoration(
+              border: Border(
+                left: BorderSide(
+                  color: isSelected ? activeColor : Colors.transparent,
+                  width: 3,
+                ),
               ),
             ),
-          ],
+            child: Column(
+              children: [
+                Stack(
+                  alignment: Alignment.topRight,
+                  children: [
+                    Icon(icon, color: color, size: 24),
+                    if (isLocked)
+                      Transform.translate(
+                        offset: const Offset(4, -4),
+                        child: const Icon(Icons.lock_rounded, size: 12, color: Colors.grey),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 10,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
