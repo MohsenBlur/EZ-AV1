@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/navigation_provider.dart';
 
-class AppShell extends StatefulWidget {
+class AppShell extends ConsumerWidget {
   const AppShell({super.key});
 
   @override
-  State<AppShell> createState() => _AppShellState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedIndex = ref.watch(selectedTabProvider);
 
-class _AppShellState extends State<AppShell> {
-  int _selectedIndex = 0;
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
       body: Row(
         children: [
@@ -25,27 +22,27 @@ class _AppShellState extends State<AppShell> {
                 _SidebarIcon(
                   icon: Icons.list_alt_rounded,
                   label: 'Batch',
-                  isSelected: _selectedIndex == 0,
-                  onTap: () => setState(() => _selectedIndex = 0),
+                  isSelected: selectedIndex == 0,
+                  onTap: () => ref.read(selectedTabProvider.notifier).state = 0,
                 ),
                 _SidebarIcon(
                   icon: Icons.compare_arrows_rounded,
                   label: 'Texture',
-                  isSelected: _selectedIndex == 1,
-                  onTap: () => setState(() => _selectedIndex = 1),
+                  isSelected: selectedIndex == 1,
+                  onTap: () => ref.read(selectedTabProvider.notifier).state = 1,
                 ),
                 _SidebarIcon(
                   icon: Icons.speed_rounded,
                   label: 'Bitrate',
-                  isSelected: _selectedIndex == 2,
-                  onTap: () => setState(() => _selectedIndex = 2),
+                  isSelected: selectedIndex == 2,
+                  onTap: () => ref.read(selectedTabProvider.notifier).state = 2,
                 ),
                 const Spacer(),
                 _SidebarIcon(
                   icon: Icons.settings_rounded,
                   label: 'Settings',
-                  isSelected: _selectedIndex == 3,
-                  onTap: () => setState(() => _selectedIndex = 3),
+                  isSelected: selectedIndex == 3,
+                  onTap: () => ref.read(selectedTabProvider.notifier).state = 3,
                 ),
                 const SizedBox(height: 20),
               ],
@@ -60,7 +57,7 @@ class _AppShellState extends State<AppShell> {
                 Expanded(
                   child: Container(
                     color: Theme.of(context).scaffoldBackgroundColor,
-                    child: _buildContent(),
+                    child: _buildContent(selectedIndex),
                   ),
                 ),
                 
@@ -93,8 +90,8 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _buildContent() {
-    switch (_selectedIndex) {
+  Widget _buildContent(int index) {
+    switch (index) {
       case 0:
         return const Center(child: Text('Batch Queue View'));
       case 1:

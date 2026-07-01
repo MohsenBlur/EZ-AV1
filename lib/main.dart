@@ -6,18 +6,14 @@ import 'ui/shell/app_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize paths and portable binaries before anything else
   EnvironmentService.init();
-  
+
   // Initialize media_kit for native video playback
   MediaKit.ensureInitialized();
 
-  runApp(
-    const ProviderScope(
-      child: EzAv1App(),
-    ),
-  );
+  runApp(const ProviderScope(child: EzAv1App()));
 }
 
 class EzAv1App extends StatelessWidget {
@@ -34,7 +30,6 @@ class EzAv1App extends StatelessWidget {
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFFF39C12), // Subtle orange highlight
           surface: Color(0xFF222222),
-          background: Color(0xFF181818),
         ),
         useMaterial3: true,
       ),

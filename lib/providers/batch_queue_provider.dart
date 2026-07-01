@@ -1,6 +1,9 @@
+import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 import '../models/batch_node_model.dart';
 import '../models/preset_model.dart';
+import 'package:path/path.dart' as p;
 
 final batchQueueProvider = StateNotifierProvider<BatchQueueNotifier, List<BatchNode>>((ref) {
   return BatchQueueNotifier();
@@ -8,20 +11,67 @@ final batchQueueProvider = StateNotifierProvider<BatchQueueNotifier, List<BatchN
 
 class BatchQueueNotifier extends StateNotifier<List<BatchNode>> {
   BatchQueueNotifier() : super([]);
+  final _uuid = const Uuid();
 
-  /// Loads a root directory and parses it.
-  void loadRootNodes(List<BatchNode> nodes) {
-    state = nodes;
+  /// Recursively parses a directory from disk and loads it into the queue.
+  Future<void> importDirectory(String path) async {
+    final dir = Directory(path);
+    if (!await dir.exists()) return;
+
+    final rootNodes = await _parseDirectory(dir);
+    state = [...state, ...rootNodes];
     _recalculateState();
+  }
+
+  Future<List<BatchNode>> _parseDirectory(Directory dir) async {
+    final nodes = <BatchNode>[];
+    try {
+      final entities = await dir.list().toList();
+      // Sort: directories first, then files alphabetically
+      entities.sort((a, b) {
+        if (a is Directory && b is File) return -1;
+        if (a is File && b is Directory) return 1;
+        return a.path.compareTo(b.path);
+      });
+
+      for (var entity in entities) {
+        final name = p.basename(entity.path);
+        final absolutePath = entity.absolute.path;
+
+        if (entity is Directory) {
+          final children = await _parseDirectory(entity);
+          // Only add directories that contain video files eventually
+          if (children.isNotEmpty) {
+            nodes.add(DirectoryNode(
+              id: _uuid.v4(),
+              name: name,
+              absolutePath: absolutePath,
+              children: children,
+            ));
+          }
+        } else if (entity is File) {
+          final ext = p.extension(entity.path).toLowerCase();
+          // Filter for common video formats
+          if (const ['.mp4', '.mkv', '.avi', '.mov', '.webm'].contains(ext)) {
+            final stat = await entity.stat();
+            nodes.add(FileNode(
+              id: _uuid.v4(),
+              name: name,
+              absolutePath: absolutePath,
+              extension: ext,
+              sizeBytes: stat.size,
+            ));
+          }
+        }
+      }
+    } catch (e) {
+      // Handle permission errors silently for now
+    }
+    return nodes;
   }
 
   /// Assigns a preset to a specific node (directory or file)
   void assignPreset(String nodeId, PresetModel preset) {
-    // Deep clone the state to ensure Riverpod notices the change
-    // For simplicity, we just mutate and re-assign the list in this skeleton.
-    // In a production app, we'd use immutable updates, but Dart object trees 
-    // are easiest handled by mutating and triggering state = [...state];
-    
     final node = _findNode(state, nodeId);
     if (node != null) {
       node.assignedPreset = preset;
@@ -46,15 +96,12 @@ class BatchQueueNotifier extends StateNotifier<List<BatchNode>> {
     for (var node in state) {
       _computeEffectiveState(node, null);
     }
-    // Trigger UI rebuild
+    // Trigger UI rebuild by creating a shallow copy of the top level list
     state = [...state];
   }
 
   /// Computes effective presets based on inheritance (cascade vs override)
   PresetModel? _computeEffectiveState(BatchNode node, PresetModel? parentPreset) {
-    // 1. Determine this node's effective preset
-    // If it has its own assigned preset, that overrides the parent.
-    // Otherwise, it inherits the parent's preset.
     node.effectivePreset = node.assignedPreset ?? parentPreset;
 
     if (node is DirectoryNode) {
@@ -69,11 +116,9 @@ class BatchQueueNotifier extends StateNotifier<List<BatchNode>> {
           firstChildPreset = childEffective;
           isFirst = false;
         } else if (childEffective != firstChildPreset) {
-          // If any child has a different effective preset than the first child, it's mixed.
           hasMixed = true;
         }
 
-        // If a child directory itself is mixed, this directory is implicitly mixed.
         if (child is DirectoryNode && child.hasMixedState) {
           hasMixed = true;
         }
