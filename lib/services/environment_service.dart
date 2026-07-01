@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:flutter/foundation.dart';
+import 'native_path_helper.dart';
 
 class EnvironmentService {
   static late final String binDirectory;
@@ -44,19 +45,13 @@ class EnvironmentService {
 
     final currentPath = Platform.environment['PATH'] ?? '';
     
-    // If the python directory is already in the path, skip
     if (currentPath.contains(pythonDirectory)) return;
 
-    // Prepend the portable python/bin directories to the PATH
-    // final newPath = '$pythonDirectory;$binDirectory;$currentPath';
-    
-    // Note: Dart doesn't have a built-in way to set environment variables 
-    // for the CURRENT process that propagate natively to loaded DLLs perfectly
-    // without FFI/win32, but setting it via a child process or using FFI is an option.
-    // Wait, we can't easily modify the current process environment variables in pure Dart 
-    // in a way that C-libraries (like libmpv) will see. 
-    // Actually, libmpv allows setting environment variables for its own use, 
-    // but for now, we will store it and pass it to Process.start(environment: {'PATH': newPath})
+    // Use FFI to actually mutate the C-runtime environment variable
+    // so that when Windows calls LoadLibrary('mpv-2.dll'), it will 
+    // find 'vapoursynth.dll' and 'python310.dll' lying around or in pythonDirectory.
+    NativePathHelper.prependToPath(binDirectory);
+    NativePathHelper.prependToPath(pythonDirectory);
     
     // For Av1an and FFmpeg, we will pass this new environment dictionary.
   }
