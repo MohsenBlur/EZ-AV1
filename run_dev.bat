@@ -1,0 +1,3 @@
+@echo off
+echo Starting EZ-AV1 in debug mode...
+flutter run -d windows
