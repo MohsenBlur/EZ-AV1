@@ -38,6 +38,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       
       // Configure looping for seamless visual comparison of small chunks
       player.setPlaylistMode(PlaylistMode.loop);
+    }
       
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initMedia();
@@ -53,8 +54,28 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
         }
       }
     });
+
+    // Snippet loop enforcer
+    _players[0]?.stream.position.listen((pos) {
+      if (_snippetStart != null && pos >= _snippetEnd!) {
+        _syncSeek(_snippetStart!);
+      }
+    });
+    
+    // Setup snippet once duration is known
+    _players[0]?.stream.duration.listen((duration) {
+      if (_snippetStart == null && duration.inSeconds > 10) {
+        // Start 20% into the video
+        _snippetStart = Duration(milliseconds: (duration.inMilliseconds * 0.2).round());
+        _snippetEnd = _snippetStart! + const Duration(seconds: 5);
+        _syncSeek(_snippetStart!);
+      }
+    });
   }
   
+  Duration? _snippetStart;
+  Duration? _snippetEnd;
+
   void _initMedia() {
     final batchFiles = ref.read(workflowProvider).batchFiles;
     if (batchFiles.isEmpty) return;

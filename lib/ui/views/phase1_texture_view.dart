@@ -45,26 +45,60 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     _originalPlayer.setPlaylistMode(PlaylistMode.loop);
     _filteredPlayer.setPlaylistMode(PlaylistMode.loop);
     
+    // Snippet loop enforcer
+    _originalPlayer.stream.position.listen((pos) {
+      if (_snippetStart != null && pos >= _snippetEnd!) {
+        _originalPlayer.seek(_snippetStart!);
+        _filteredPlayer.seek(_snippetStart!);
+      }
+    });
+    
+    // Setup snippet once duration is known
+    _originalPlayer.stream.duration.listen((duration) {
+      if (_snippetStart == null && duration.inSeconds > 10) {
+        // Start 20% into the video
+        _snippetStart = Duration(milliseconds: (duration.inMilliseconds * 0.2).round());
+        _snippetEnd = _snippetStart! + const Duration(seconds: 5);
+        _originalPlayer.seek(_snippetStart!);
+        _filteredPlayer.seek(_snippetStart!);
+      }
+    });
+
+    // Master Clock Drift Enforcer
+    _originalPlayer.stream.position.listen((masterPos) {
+      final slavePos = _filteredPlayer.state.position;
+      if ((masterPos - slavePos).inMilliseconds.abs() > 150) {
+        _filteredPlayer.seek(masterPos);
+      }
+    });
+    
     // Load initial media after first frame when ref is available
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initMedia();
     });
   }
   
+  Duration? _snippetStart;
+  Duration? _snippetEnd;
+
   Future<void> _initMedia() async {
     final batchFiles = ref.read(workflowProvider).batchFiles;
     if (batchFiles.isNotEmpty) {
       _currentVideoPath = batchFiles.first;
-      await _originalPlayer.open(Media(_currentVideoPath!), play: true);
       
-      setState(() => _isCompilingScript = true);
+      // Load the exact same original video in both players
+      await _originalPlayer.open(Media(_currentVideoPath!), play: true);
+      await _filteredPlayer.open(Media(_currentVideoPath!), play: true);
+      
+      // Initially set an empty script just to initialize the filter chain
       try {
-        final scriptPath = await VapourSynthService.generateDenoiseScript(_currentVideoPath!, _denoiseStrength);
-        await _filteredPlayer.open(Media(scriptPath), play: true);
+        final scriptPath = await VapourSynthService.generateDenoiseScript(_denoiseStrength);
+        if (_filteredPlayer.platform is NativePlayer) {
+          final escapedPath = scriptPath.replaceAll('\\', '\\\\');
+          await (_filteredPlayer.platform as NativePlayer).setProperty('vf', 'vapoursynth="$escapedPath"');
+        }
       } catch (e) {
         debugPrint('Script error: $e');
-      } finally {
-        if (mounted) setState(() => _isCompilingScript = false);
       }
     }
   }
@@ -89,13 +123,13 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
       
       if (_currentVideoPath == null) return;
       try {
-        final scriptPath = await VapourSynthService.generateDenoiseScript(_currentVideoPath!, _denoiseStrength);
+        final scriptPath = await VapourSynthService.generateDenoiseScript(_denoiseStrength);
         
-        // Save current position to seamless seek after reload
-        final currentPosition = _originalPlayer.state.position;
-        
-        await _filteredPlayer.open(Media(scriptPath), play: true);
-        await _filteredPlayer.seek(currentPosition);
+        // Dynamically apply the new VapourSynth filter script!
+        if (_filteredPlayer.platform is NativePlayer) {
+          final escapedPath = scriptPath.replaceAll('\\', '\\\\');
+          await (_filteredPlayer.platform as NativePlayer).setProperty('vf', 'vapoursynth="$escapedPath"');
+        }
       } catch (e) {
         debugPrint('Script error: $e');
       } finally {
