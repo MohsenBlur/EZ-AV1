@@ -56,40 +56,72 @@ class EnvironmentService {
     return missing;
   }
 
-  /// Initializes environment paths and pre-loads VapourSynth DLL dependencies.
+  /// Initializes environment paths, pre-loads DLLs, and syncs core DLLs to executable folder.
   /// Returns a list of missing components if any.
   static List<String> init() {
     final missing = getMissingBinaries();
     if (missing.isEmpty) {
       _injectPath();
+      _syncBinariesToExeDir();
       _preloadVapourSynthDLLs();
     }
     return missing;
   }
 
   /// Injects the bundled python and bin directories into process PATH, DLL search path,
-  /// and sets VSSCRIPT_PATH for libmpv.
+  /// and sets VSSCRIPT_PATH for libmpv using both Win32 and C runtime API.
   static void _injectPath() {
     if (!Platform.isWindows) return;
 
-    // Use Win32 FFI to mutate process PATH and DLL search order
     NativePathHelper.prependToPath(binDirectory);
     NativePathHelper.prependToPath(pythonDirectory);
     
-    // Set Win32 DLL Search Directory so Windows OS Loader finds python311.dll & VapourSynth.dll
     NativePathHelper.setDllDirectory(pythonDirectory);
     NativePathHelper.setDllDirectory(binDirectory);
 
-    // Tell mpv where VSScript.dll is
     final vsScriptPath = p.join(pythonDirectory, 'VSScript.dll');
     NativePathHelper.setEnvVar('VSSCRIPT_PATH', vsScriptPath);
     NativePathHelper.setEnvVar('PYTHONHOME', pythonDirectory);
     NativePathHelper.setEnvVar('PYTHONPATH', pythonDirectory);
   }
 
+  /// Copies VapourSynth DLL dependencies to the target executable directory (e.g. Debug/Release runner folder)
+  /// so Windows OS DLL loader resolves VSScript.dll, python311.dll, and KNLMeansCL.dll natively.
+  static void _syncBinariesToExeDir() {
+    if (!Platform.isWindows) return;
+    try {
+      final exeDir = p.dirname(Platform.resolvedExecutable);
+      if (exeDir == binDirectory || exeDir == pythonDirectory || exeDir.isEmpty) return;
+
+      final filesToSync = [
+        'VSScript.dll',
+        'VapourSynth.dll',
+        'python311.dll',
+        'python311.zip',
+        'python311._pth',
+        'KNLMeansCL.dll',
+        'mpv-2.dll',
+      ];
+
+      for (final filename in filesToSync) {
+        final src = File(p.join(pythonDirectory, filename));
+        final altSrc = File(p.join(binDirectory, filename));
+        final target = File(p.join(exeDir, filename));
+
+        final sourceFile = src.existsSync() ? src : (altSrc.existsSync() ? altSrc : null);
+        if (sourceFile != null) {
+          if (!target.existsSync() || target.lengthSync() != sourceFile.lengthSync()) {
+            sourceFile.copySync(target.path);
+            debugPrint('Synced $filename to executable directory: ${target.path}');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Warning syncing binaries to executable dir: $e');
+    }
+  }
+
   /// Pre-loads python311.dll, VapourSynth.dll, and VSScript.dll into process address space.
-  /// When libmpv runs LoadLibrary('VSScript.dll'), Windows will find them already loaded,
-  /// enabling vf=vapoursynth without 'Option vf: vapoursynth doesn't exist' errors.
   static void _preloadVapourSynthDLLs() {
     if (!Platform.isWindows) return;
 

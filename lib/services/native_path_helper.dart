@@ -59,6 +59,37 @@ class NativePathHelper {
     
     calloc.free(namePtr);
     calloc.free(valuePtr);
+
+    // Also update C runtime environment dictionary via _wputenv
+    setCEnvVar(name, value);
+  }
+
+  static void setCEnvVar(String name, String value) {
+    if (!Platform.isWindows) return;
+
+    try {
+      final DynamicLibrary crt = DynamicLibrary.open('ucrtbase.dll');
+      final wputenv = crt.lookupFunction<
+          Int32 Function(Pointer<Utf16>),
+          int Function(Pointer<Utf16>)
+      >('_wputenv');
+
+      final envPairPtr = '$name=$value'.toNativeUtf16();
+      wputenv(envPairPtr);
+      calloc.free(envPairPtr);
+    } catch (_) {
+      try {
+        final DynamicLibrary crt = DynamicLibrary.open('msvcrt.dll');
+        final wputenv = crt.lookupFunction<
+            Int32 Function(Pointer<Utf16>),
+            int Function(Pointer<Utf16>)
+        >('_wputenv');
+
+        final envPairPtr = '$name=$value'.toNativeUtf16();
+        wputenv(envPairPtr);
+        calloc.free(envPairPtr);
+      } catch (_) {}
+    }
   }
 
   static void setDllDirectory(String path) {

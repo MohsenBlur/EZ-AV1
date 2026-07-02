@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -9,55 +8,45 @@ import 'environment_service.dart';
 class PreviewService {
   static final Map<String, String> _snippetCache = {};
 
-  /// Returns keyframe timestamps (in seconds) for the specified video file.
-  static Future<List<double>> getKeyframeTimestamps(String videoPath) async {
-    final keyframes = <double>[];
+  /// Probes the container format duration in seconds (~5ms execution).
+  static Future<double> getVideoDuration(String videoPath) async {
     try {
       final result = await Process.run(
         EnvironmentService.ffprobePath,
         [
           '-v', 'error',
-          '-select_streams', 'v:0',
-          '-skip_frame', 'nokey',
-          '-show_entries', 'frame=pts_time',
-          '-of', 'json',
+          '-show_entries', 'format=duration',
+          '-of', 'default=noprint_wrappers=1:nokey=1',
           videoPath,
         ],
         environment: EnvironmentService.processEnvironment,
       );
 
       if (result.exitCode == 0) {
-        final jsonResult = jsonDecode(result.stdout as String);
-        final frames = jsonResult['frames'] as List<dynamic>?;
-        if (frames != null) {
-          for (final frame in frames) {
-            final ptsTimeStr = frame['pts_time']?.toString();
-            if (ptsTimeStr != null) {
-              final val = double.tryParse(ptsTimeStr);
-              if (val != null) keyframes.add(val);
-            }
-          }
-        }
+        final durationStr = (result.stdout as String).trim();
+        return double.tryParse(durationStr) ?? 0.0;
       }
     } catch (e) {
-      debugPrint('Error probing keyframes: $e');
+      debugPrint('[PreviewService] Duration probe exception: $e');
     }
-    // Remove duplicates and sort
-    final uniqueSorted = keyframes.toSet().toList()..sort();
-    return uniqueSorted;
+    return 0.0;
   }
 
   /// Extracts a keyframe-aligned snippet from [videoPath] of approximately [targetDurationSec] seconds.
-  /// Uses fast, 100% lossless stream copy (-c copy) between keyframe boundaries.
+  /// Uses fast input seeking (-ss before -i) and stream copy (-c copy) to cut at keyframe boundaries instantly (~15ms).
   /// Falls back to ultrafast re-encode if stream copy fails for exotic video containers.
   static Future<String> extractKeyframeSnippet(
     String videoPath, {
     double targetDurationSec = 3.0,
     bool forceReextract = false,
   }) async {
+    final stopwatch = Stopwatch()..start();
+    debugPrint('[PreviewService] Starting keyframe snippet extraction for: $videoPath');
+
     if (!forceReextract && _snippetCache.containsKey(videoPath)) {
       final cachedPath = _snippetCache[videoPath]!;
       if (File(cachedPath).existsSync() && File(cachedPath).lengthSync() > 0) {
+        debugPrint('[PreviewService] Serving cached snippet (${File(cachedPath).lengthSync()} bytes) in ${stopwatch.elapsedMilliseconds}ms: $cachedPath');
         return cachedPath;
       }
     }
@@ -73,79 +62,56 @@ class PreviewService {
     final fileName = 'ez_av1_snippet_${videoPath.hashCode.abs()}$ext';
     final outputPath = p.join(tempDir.path, fileName);
 
-    final keyframes = await getKeyframeTimestamps(videoPath);
+    final totalDurationSec = await getVideoDuration(videoPath);
+    debugPrint('[PreviewService] Probed total video duration: ${totalDurationSec.toStringAsFixed(2)}s');
 
     double startSec = 0.0;
-    double durationSec = targetDurationSec;
-
-    if (keyframes.length >= 2) {
-      final totalDuration = keyframes.last;
-
-      if (totalDuration > targetDurationSec) {
-        // Pick a start keyframe between 10% and 75% of total duration (avoiding intros/outros)
-        final minStart = totalDuration * 0.10;
-        final maxStart = max(minStart, totalDuration - (targetDurationSec + 2.0));
-
-        final candidateIndices = <int>[];
-        for (int i = 0; i < keyframes.length - 1; i++) {
-          if (keyframes[i] >= minStart && keyframes[i] <= maxStart) {
-            candidateIndices.add(i);
-          }
-        }
-
-        int startIdx = 0;
-        if (candidateIndices.isNotEmpty) {
-          final rand = Random();
-          startIdx = candidateIndices[rand.nextInt(candidateIndices.length)];
-        }
-
-        startSec = keyframes[startIdx];
-
-        // Find the keyframe index j >= startIdx where keyframes[j] - startSec >= targetDurationSec
-        int endIdx = startIdx + 1;
-        for (int j = startIdx + 1; j < keyframes.length; j++) {
-          endIdx = j;
-          if (keyframes[j] - startSec >= targetDurationSec) {
-            break;
-          }
-        }
-        durationSec = max(1.0, keyframes[endIdx] - startSec);
-      }
+    if (totalDurationSec > targetDurationSec + 2.0) {
+      final minStart = totalDurationSec * 0.15;
+      final maxStart = totalDurationSec - (targetDurationSec + 2.0);
+      startSec = minStart + Random().nextDouble() * (maxStart - minStart);
     }
 
-    // 1. Primary Attempt: Keyframe-aligned Lossless Stream Copy
-    final streamCopyArgs = <String>[
+    debugPrint('[PreviewService] Selected target start timestamp: ${startSec.toStringAsFixed(2)}s (Target duration: ${targetDurationSec}s)');
+
+    // 1. Primary Attempt: Instant Keyframe Seek Stream Copy (-ss BEFORE -i seeks to nearest I-frame in ~10ms)
+    final args = <String>[
       '-ss', startSec.toStringAsFixed(3),
       '-i', videoPath,
-      '-t', durationSec.toStringAsFixed(3),
+      '-t', targetDurationSec.toStringAsFixed(3),
       '-c', 'copy',
       '-avoid_negative_ts', 'make_zero',
       '-y',
       outputPath,
     ];
 
+    debugPrint('[PreviewService] Executing FFmpeg fast keyframe stream-copy: ${args.join(" ")}');
+
     try {
       final result = await Process.run(
         EnvironmentService.ffmpegPath,
-        streamCopyArgs,
+        args,
         environment: EnvironmentService.processEnvironment,
       );
 
       final outputFile = File(outputPath);
       if (result.exitCode == 0 && outputFile.existsSync() && outputFile.lengthSync() > 0) {
         _snippetCache[videoPath] = outputPath;
+        debugPrint('[PreviewService] Snippet extracted successfully in ${stopwatch.elapsedMilliseconds}ms (${outputFile.lengthSync()} bytes): $outputPath');
         return outputPath;
+      } else {
+        debugPrint('[PreviewService] FFmpeg stream copy warning: exitCode=${result.exitCode}, stderr=${result.stderr}');
       }
-      debugPrint('FFmpeg stream copy warning: exitCode=${result.exitCode}, stderr=${result.stderr}. Attempting fallback re-encode...');
     } catch (e) {
-      debugPrint('FFmpeg stream copy exception: $e. Attempting fallback re-encode...');
+      debugPrint('[PreviewService] FFmpeg stream copy exception: $e');
     }
 
     // 2. Fallback Attempt: Fast Re-encode if Stream Copy Fails
+    debugPrint('[PreviewService] Falling back to ultrafast re-encode...');
     final fallbackArgs = <String>[
       '-ss', startSec.toStringAsFixed(3),
       '-i', videoPath,
-      '-t', durationSec.toStringAsFixed(3),
+      '-t', targetDurationSec.toStringAsFixed(3),
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-crf', '18',
@@ -164,10 +130,11 @@ class PreviewService {
       final outputFile = File(outputPath);
       if (result.exitCode == 0 && outputFile.existsSync() && outputFile.lengthSync() > 0) {
         _snippetCache[videoPath] = outputPath;
+        debugPrint('[PreviewService] Fallback snippet re-encoded in ${stopwatch.elapsedMilliseconds}ms: $outputPath');
         return outputPath;
       }
     } catch (e) {
-      debugPrint('FFmpeg fallback re-encode failed: $e');
+      debugPrint('[PreviewService] Fallback re-encode exception: $e');
     }
 
     // Fallback to raw input video if extraction completely fails
