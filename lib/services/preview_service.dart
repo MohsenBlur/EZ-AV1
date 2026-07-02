@@ -42,12 +42,14 @@ class PreviewService {
     } catch (e) {
       debugPrint('Error probing keyframes: $e');
     }
-    keyframes.sort();
-    return keyframes;
+    // Remove duplicates and sort
+    final uniqueSorted = keyframes.toSet().toList()..sort();
+    return uniqueSorted;
   }
 
   /// Extracts a keyframe-aligned snippet from [videoPath] of approximately [targetDurationSec] seconds.
-  /// Uses stream copy (-c copy) between keyframe boundaries for instant, 100% lossless extraction.
+  /// Uses fast, 100% lossless stream copy (-c copy) between keyframe boundaries.
+  /// Falls back to ultrafast re-encode if stream copy fails for exotic video containers.
   static Future<String> extractKeyframeSnippet(
     String videoPath, {
     double targetDurationSec = 3.0,
@@ -55,7 +57,7 @@ class PreviewService {
   }) async {
     if (!forceReextract && _snippetCache.containsKey(videoPath)) {
       final cachedPath = _snippetCache[videoPath]!;
-      if (File(cachedPath).existsSync()) {
+      if (File(cachedPath).existsSync() && File(cachedPath).lengthSync() > 0) {
         return cachedPath;
       }
     }
@@ -74,7 +76,7 @@ class PreviewService {
     final keyframes = await getKeyframeTimestamps(videoPath);
 
     double startSec = 0.0;
-    double? endSec;
+    double durationSec = targetDurationSec;
 
     if (keyframes.length >= 2) {
       final totalDuration = keyframes.last;
@@ -107,45 +109,73 @@ class PreviewService {
             break;
           }
         }
-        endSec = keyframes[endIdx];
+        durationSec = max(1.0, keyframes[endIdx] - startSec);
       }
     }
 
-    final args = <String>[
+    // 1. Primary Attempt: Keyframe-aligned Lossless Stream Copy
+    final streamCopyArgs = <String>[
       '-ss', startSec.toStringAsFixed(3),
-    ];
-    if (endSec != null) {
-      args.addAll(['-to', endSec.toStringAsFixed(3)]);
-    } else {
-      args.addAll(['-t', targetDurationSec.toStringAsFixed(3)]);
-    }
-
-    args.addAll([
       '-i', videoPath,
+      '-t', durationSec.toStringAsFixed(3),
       '-c', 'copy',
       '-avoid_negative_ts', 'make_zero',
       '-y',
       outputPath,
-    ]);
+    ];
 
     try {
       final result = await Process.run(
         EnvironmentService.ffmpegPath,
-        args,
+        streamCopyArgs,
         environment: EnvironmentService.processEnvironment,
       );
 
-      if (result.exitCode == 0 && File(outputPath).existsSync()) {
+      final outputFile = File(outputPath);
+      if (result.exitCode == 0 && outputFile.existsSync() && outputFile.lengthSync() > 0) {
         _snippetCache[videoPath] = outputPath;
         return outputPath;
-      } else {
-        debugPrint('FFmpeg snippet extraction non-zero exit: ${result.stderr}');
       }
+      debugPrint('FFmpeg stream copy warning: exitCode=${result.exitCode}, stderr=${result.stderr}. Attempting fallback re-encode...');
     } catch (e) {
-      debugPrint('FFmpeg snippet extraction failed: $e');
+      debugPrint('FFmpeg stream copy exception: $e. Attempting fallback re-encode...');
     }
 
-    // Fallback if keyframe stream copy failed: fallback to raw input video
+    // 2. Fallback Attempt: Fast Re-encode if Stream Copy Fails
+    final fallbackArgs = <String>[
+      '-ss', startSec.toStringAsFixed(3),
+      '-i', videoPath,
+      '-t', durationSec.toStringAsFixed(3),
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '18',
+      '-an',
+      '-y',
+      outputPath,
+    ];
+
+    try {
+      final result = await Process.run(
+        EnvironmentService.ffmpegPath,
+        fallbackArgs,
+        environment: EnvironmentService.processEnvironment,
+      );
+
+      final outputFile = File(outputPath);
+      if (result.exitCode == 0 && outputFile.existsSync() && outputFile.lengthSync() > 0) {
+        _snippetCache[videoPath] = outputPath;
+        return outputPath;
+      }
+    } catch (e) {
+      debugPrint('FFmpeg fallback re-encode failed: $e');
+    }
+
+    // Fallback to raw input video if extraction completely fails
     return videoPath;
+  }
+
+  /// Clears the in-memory snippet cache.
+  static void clearCache() {
+    _snippetCache.clear();
   }
 }

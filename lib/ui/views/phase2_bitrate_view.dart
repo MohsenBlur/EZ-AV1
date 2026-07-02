@@ -30,6 +30,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   bool _isPlaying = true;
   bool _smartReveal = false;
   bool _isLoadingSnippet = false;
+  String? _currentVideoPath;
   
   // Wipe crosshair coordinates (0.0 to 1.0)
   double _splitX = 0.5;
@@ -48,6 +49,22 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       player.setPlaylistMode(PlaylistMode.loop);
       player.setVolume(0.0);
     }
+
+    // Master sync guardrail: keep quad players 1, 2, and 3 locked to player 0
+    if (_players[0] != null) {
+      _subscriptions.add(_players[0]!.stream.position.listen((pos) {
+        if (!mounted || !_isPlaying) return;
+        for (int i = 1; i < 4; i++) {
+          final player = _players[i];
+          if (player != null) {
+            final diff = (pos - player.state.position).inMilliseconds.abs();
+            if (diff > 250) {
+              player.seek(pos);
+            }
+          }
+        }
+      }));
+    }
       
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initMedia();
@@ -60,15 +77,15 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       return;
     }
     
-    final currentVideoPath = batchFiles.first;
+    _currentVideoPath = batchFiles.first;
     if (mounted) setState(() => _isLoadingSnippet = true);
     
     String snippetPath;
     try {
-      snippetPath = await PreviewService.extractKeyframeSnippet(currentVideoPath);
+      snippetPath = await PreviewService.extractKeyframeSnippet(_currentVideoPath!);
     } catch (e) {
       debugPrint('Snippet extraction error in Phase 2: $e');
-      snippetPath = currentVideoPath;
+      snippetPath = _currentVideoPath!;
     } finally {
       if (mounted) setState(() => _isLoadingSnippet = false);
     }
@@ -140,6 +157,13 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
 
   @override
   Widget build(BuildContext context) {
+    // Listen for batch queue changes to auto-update video player if selection changes
+    ref.listenManual(workflowProvider.select((w) => w.batchFiles), (previous, next) {
+      if (next.isNotEmpty && next.first != _currentVideoPath) {
+        _initMedia();
+      }
+    });
+
     // Watch execution state for resource suspension
     final isRendering = ref.watch(executionProvider.select((s) => s.isRunning));
 

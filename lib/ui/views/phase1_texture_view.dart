@@ -58,6 +58,16 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
         debugPrint('MPV Filter Log: ${event.level} - ${event.text}');
       }
     }));
+
+    // Frame synchronization guardrail: keeps filtered layer locked to original player
+    _subscriptions.add(_originalPlayer.stream.position.listen((pos) {
+      if (!mounted || !_originalPlayer.state.playing) return;
+      final filteredPos = _filteredPlayer.state.position;
+      final diff = (pos - filteredPos).inMilliseconds.abs();
+      if (diff > 250) {
+        _filteredPlayer.seek(pos);
+      }
+    }));
     
     // Load initial media after first frame when ref is available
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -151,6 +161,13 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
 
   @override
   Widget build(BuildContext context) {
+    // Listen for batch queue changes to auto-update video player if selection changes
+    ref.listenManual(workflowProvider.select((w) => w.batchFiles), (previous, next) {
+      if (next.isNotEmpty && next.first != _currentVideoPath) {
+        _initMedia();
+      }
+    });
+
     // Watch execution state for resource suspension
     final isRendering = ref.watch(executionProvider.select((s) => s.isRunning));
 
