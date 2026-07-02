@@ -35,7 +35,9 @@ class Av1anService {
     args.addAll(['--target-quality', '${preset.targetVmaf}']);
     
     // SVT-AV1 encoder flags
-    final photonNoise = calculatePhotonNoise(preset.denoiseStrength);
+    final photonNoise = preset.photonNoise > 0 
+        ? preset.photonNoise 
+        : calculatePhotonNoise(preset.denoiseStrength);
     
     final videoParams = [
       '--preset', '4', // Good balance for SVT-AV1

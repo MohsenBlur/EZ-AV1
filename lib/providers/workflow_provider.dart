@@ -9,12 +9,14 @@ enum SourceType {
 class WorkflowState {
   final List<String> batchFiles;
   final SourceType sourceType;
+  final double denoiseStrength;
   final bool isPhase1Complete;
   final bool isPhase2Complete;
 
   const WorkflowState({
     this.batchFiles = const [],
     this.sourceType = SourceType.unselected,
+    this.denoiseStrength = 0.0,
     this.isPhase1Complete = false,
     this.isPhase2Complete = false,
   });
@@ -22,12 +24,14 @@ class WorkflowState {
   WorkflowState copyWith({
     List<String>? batchFiles,
     SourceType? sourceType,
+    double? denoiseStrength,
     bool? isPhase1Complete,
     bool? isPhase2Complete,
   }) {
     return WorkflowState(
       batchFiles: batchFiles ?? this.batchFiles,
       sourceType: sourceType ?? this.sourceType,
+      denoiseStrength: denoiseStrength ?? this.denoiseStrength,
       isPhase1Complete: isPhase1Complete ?? this.isPhase1Complete,
       isPhase2Complete: isPhase2Complete ?? this.isPhase2Complete,
     );
@@ -54,8 +58,15 @@ class WorkflowNotifier extends Notifier<WorkflowState> {
     state = state.copyWith(sourceType: type);
   }
 
-  void completePhase1() {
-    state = state.copyWith(isPhase1Complete: true);
+  void setDenoiseStrength(double strength) {
+    state = state.copyWith(denoiseStrength: strength);
+  }
+
+  void completePhase1([double? denoiseStrength]) {
+    state = state.copyWith(
+      denoiseStrength: denoiseStrength ?? state.denoiseStrength,
+      isPhase1Complete: true,
+    );
   }
 
   void completePhase2() {

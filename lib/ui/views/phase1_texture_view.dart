@@ -76,6 +76,12 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     
     // Load initial media after first frame when ref is available
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      final savedDenoise = ref.read(workflowProvider).denoiseStrength;
+      if (savedDenoise > 0) {
+        setState(() {
+          _denoiseStrength = savedDenoise;
+        });
+      }
       _initMedia();
     });
   }
@@ -219,7 +225,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
               const Spacer(),
               ElevatedButton.icon(
                 onPressed: () {
-                  ref.read(workflowProvider.notifier).completePhase1();
+                  ref.read(workflowProvider.notifier).completePhase1(_denoiseStrength);
                   ref.read(selectedTabProvider.notifier).setTab(3); // Bitrate
                 },
                 style: ElevatedButton.styleFrom(

@@ -200,11 +200,13 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
               const SizedBox(width: 16),
               ElevatedButton.icon(
                 onPressed: () {
+                  final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
                   final preset = PresetModel(
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
                     name: 'Auto-VMAF ${_vmafTargets[_selectedTargetIndex].toInt()}',
+                    denoiseStrength: denoiseStrength,
                     targetVmaf: _vmafTargets[_selectedTargetIndex],
-                    photonNoise: _smartReveal ? 0 : 20,
+                    photonNoise: _smartReveal ? 0 : (denoiseStrength > 0 ? 0 : 20),
                   );
                   
                   // Apply to all files for the quick flow

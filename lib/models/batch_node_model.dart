@@ -79,8 +79,8 @@ class DirectoryNode extends BatchNode {
     required super.name,
     required super.absolutePath,
     super.assignedPreset,
-    this.children = const [],
-  });
+    List<BatchNode>? children,
+  }) : children = children != null ? List<BatchNode>.from(children) : <BatchNode>[];
 
   @override
   Map<String, dynamic> toJson() => {

@@ -57,5 +57,26 @@ void main() {
       expect(args.contains('--workers'), isTrue);
       expect(args.contains('1'), isTrue);
     });
+
+    test('buildArgs respects explicit preset.photonNoise when denoiseStrength is 0', () {
+      const preset = PresetModel(
+        id: 'test_preset_2',
+        name: 'Explicit Photon Noise Test',
+        denoiseStrength: 0.0,
+        photonNoise: 20,
+        targetVmaf: 95.0,
+      );
+
+      final args = Av1anService.buildArgs(
+        sourceVideo: r'C:\test.mkv',
+        outputVideo: r'C:\test_av1.mkv',
+        preset: preset,
+      );
+
+      final vIndex = args.indexOf('-v');
+      expect(vIndex, greaterThan(-1));
+      final videoParams = args[vIndex + 1];
+      expect(videoParams.contains('--film-grain 20'), isTrue);
+    });
   });
 }
