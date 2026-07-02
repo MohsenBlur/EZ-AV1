@@ -116,9 +116,9 @@ class DirectoryNode extends BatchNode {
       assignedPreset: json['assignedPreset'] != null 
           ? PresetModel.fromJson(json['assignedPreset'] as Map<String, dynamic>) 
           : null,
-      children: (json['children'] as List<dynamic>)
-          .map((e) => BatchNode.fromJson(e as Map<String, dynamic>))
-          .toList(),
+      children: (json['children'] as List<dynamic>?)
+          ?.map((e) => BatchNode.fromJson(e as Map<String, dynamic>))
+          .toList() ?? <BatchNode>[],
     );
   }
 }

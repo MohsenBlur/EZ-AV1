@@ -77,5 +77,18 @@ void main() {
       expect(files.length, equals(2));
       expect(files.map((f) => f.absolutePath), containsAll(['/a.mp4', '/sub/b.mkv']));
     });
+
+    test('DirectoryNode.fromJson handles null or missing children safely', () {
+      final jsonMap = {
+        'type': 'directory',
+        'id': 'd_null',
+        'name': 'NullDir',
+        'absolutePath': '/NullDir',
+        'children': null,
+      };
+
+      final node = DirectoryNode.fromJson(jsonMap);
+      expect(node.children, isEmpty);
+    });
   });
 }
