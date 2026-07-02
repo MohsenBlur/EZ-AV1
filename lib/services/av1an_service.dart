@@ -52,7 +52,7 @@ class Av1anService {
     args.add(videoParams.join(' '));
 
     // Audio / Metadata flags
-    final audioFlags = <String>['-c:s', 'copy', '-c:a', 'libopus', '-b:a', '${preset.audioBitrate}k'];
+    final audioFlags = <String>['-c:a', 'libopus', '-b:a', '${preset.audioBitrate}k'];
     if (preset.downmixToStereo) {
       audioFlags.addAll(['-ac', '2']);
     }
