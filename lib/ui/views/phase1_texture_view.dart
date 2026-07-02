@@ -45,6 +45,9 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     _originalPlayer.setPlaylistMode(PlaylistMode.loop);
     _filteredPlayer.setPlaylistMode(PlaylistMode.loop);
     
+    _originalPlayer.setVolume(0.0);
+    _filteredPlayer.setVolume(0.0);
+    
     // Snippet loop enforcer
     _originalPlayer.stream.position.listen((pos) {
       if (_snippetStart != null && pos >= _snippetEnd!) {
@@ -94,7 +97,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
       try {
         final scriptPath = await VapourSynthService.generateDenoiseScript(_denoiseStrength);
         if (_filteredPlayer.platform is NativePlayer) {
-          final escapedPath = scriptPath.replaceAll('\\', '\\\\');
+          final escapedPath = scriptPath.replaceAll('\\', '/');
           await (_filteredPlayer.platform as NativePlayer).setProperty('vf', 'vapoursynth="$escapedPath"');
         }
       } catch (e) {
@@ -127,7 +130,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
         
         // Dynamically apply the new VapourSynth filter script!
         if (_filteredPlayer.platform is NativePlayer) {
-          final escapedPath = scriptPath.replaceAll('\\', '\\\\');
+          final escapedPath = scriptPath.replaceAll('\\', '/');
           await (_filteredPlayer.platform as NativePlayer).setProperty('vf', 'vapoursynth="$escapedPath"');
         }
       } catch (e) {

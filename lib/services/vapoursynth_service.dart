@@ -19,7 +19,10 @@ class VapourSynthService {
     
     if (denoiseStrength > 0) {
       // The 'h' parameter in KNLMeansCL roughly correlates to denoise strength
-      sb.writeln('clip = core.knlm.KNLMeansCL(clip, a=1, h=$denoiseStrength, d=1, device_type="gpu")');
+      sb.writeln('try:');
+      sb.writeln('    clip = core.knlm.KNLMeansCL(clip, a=1, h=$denoiseStrength, d=1, device_type="auto")');
+      sb.writeln('except Exception as e:');
+      sb.writeln('    pass # Fallback to original clip if KNLMeansCL fails');
     }
     
     sb.writeln('clip.set_output()');

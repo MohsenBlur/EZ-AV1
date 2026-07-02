@@ -26,6 +26,10 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   int _selectedTargetIndex = 2; // Default to 95.0
   bool _isPlaying = true;
   bool _smartReveal = false;
+  
+  // Wipe crosshair coordinates (0.0 to 1.0)
+  double _splitX = 0.5;
+  double _splitY = 0.5;
 
   @override
   void initState() {
@@ -38,6 +42,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       
       // Configure looping for seamless visual comparison of small chunks
       player.setPlaylistMode(PlaylistMode.loop);
+      player.setVolume(0.0);
     }
       
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -246,17 +251,100 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                   color: Colors.black,
                   child: Column(
                     children: [
-                      // Grid
+                      // Quad-Split Wipe View
                       Expanded(
-                        child: GridView.count(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 2,
-                          crossAxisSpacing: 2,
-                          childAspectRatio: 16/9,
-                          physics: const NeverScrollableScrollPhysics(),
-                          children: List.generate(4, (index) {
-                            return _buildQuadQuadrant(index);
-                          }),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            return GestureDetector(
+                              onPanUpdate: (details) {
+                                setState(() {
+                                  _splitX += details.delta.dx / constraints.maxWidth;
+                                  _splitY += details.delta.dy / constraints.maxHeight;
+                                  _splitX = _splitX.clamp(0.0, 1.0);
+                                  _splitY = _splitY.clamp(0.0, 1.0);
+                                });
+                              },
+                              onTapDown: (details) {
+                                final x = details.localPosition.dx / constraints.maxWidth;
+                                final y = details.localPosition.dy / constraints.maxHeight;
+                                
+                                int selected = 0;
+                                if (x < _splitX && y < _splitY) selected = 0;
+                                else if (x >= _splitX && y < _splitY) selected = 1;
+                                else if (x < _splitX && y >= _splitY) selected = 2;
+                                else if (x >= _splitX && y >= _splitY) selected = 3;
+                                
+                                setState(() => _selectedTargetIndex = selected);
+                              },
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  // Video 0 (Top-Left) is the base layer
+                                  Video(controller: _controllers[0]!, controls: NoVideoControls),
+                                  if (_selectedTargetIndex == 0) _buildSelectionHighlight(0.0, 0.0, _splitX, _splitY, constraints),
+                                  
+                                  // Video 1 (Top-Right)
+                                  ClipRect(
+                                    clipper: _QuadClipper(_splitX, 0.0, 1.0, _splitY),
+                                    child: Video(controller: _controllers[1]!, controls: NoVideoControls),
+                                  ),
+                                  if (_selectedTargetIndex == 1) _buildSelectionHighlight(_splitX, 0.0, 1.0, _splitY, constraints),
+                                  
+                                  // Video 2 (Bottom-Left)
+                                  ClipRect(
+                                    clipper: _QuadClipper(0.0, _splitY, _splitX, 1.0),
+                                    child: Video(controller: _controllers[2]!, controls: NoVideoControls),
+                                  ),
+                                  if (_selectedTargetIndex == 2) _buildSelectionHighlight(0.0, _splitY, _splitX, 1.0, constraints),
+                                  
+                                  // Video 3 (Bottom-Right)
+                                  ClipRect(
+                                    clipper: _QuadClipper(_splitX, _splitY, 1.0, 1.0),
+                                    child: Video(controller: _controllers[3]!, controls: NoVideoControls),
+                                  ),
+                                  if (_selectedTargetIndex == 3) _buildSelectionHighlight(_splitX, _splitY, 1.0, 1.0, constraints),
+                                  
+                                  // Crosshair Vertical Line
+                                  Positioned(
+                                    left: constraints.maxWidth * _splitX - 1,
+                                    top: 0,
+                                    bottom: 0,
+                                    width: 2,
+                                    child: Container(color: Theme.of(context).colorScheme.primary),
+                                  ),
+                                  
+                                  // Crosshair Horizontal Line
+                                  Positioned(
+                                    top: constraints.maxHeight * _splitY - 1,
+                                    left: 0,
+                                    right: 0,
+                                    height: 2,
+                                    child: Container(color: Theme.of(context).colorScheme.primary),
+                                  ),
+                                  
+                                  // Crosshair Center Node
+                                  Positioned(
+                                    left: constraints.maxWidth * _splitX - 6,
+                                    top: constraints.maxHeight * _splitY - 6,
+                                    width: 12,
+                                    height: 12,
+                                    child: Container(
+                                      decoration: const BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ),
+                                  
+                                  // Corner Labels
+                                  Positioned(top: 16, left: 16, child: _buildLabel(0)),
+                                  Positioned(top: 16, right: 16, child: _buildLabel(1)),
+                                  Positioned(bottom: 16, left: 16, child: _buildLabel(2)),
+                                  Positioned(bottom: 16, right: 16, child: _buildLabel(3)),
+                                ],
+                              ),
+                            );
+                          }
                         ),
                       ),
                       
@@ -356,54 +444,66 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     );
   }
 
-  Widget _buildQuadQuadrant(int index) {
+  Widget _buildLabel(int index) {
     final isSelected = index == _selectedTargetIndex;
     final vmafTarget = _vmafTargets[index];
     
-    return GestureDetector(
-      onTap: () => setState(() => _selectedTargetIndex = index),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // Video Player
-          Video(
-            controller: _controllers[index]!,
-            controls: NoVideoControls, // Clean quad split, no individual controls
-          ),
-          
-          // Selection Border
-          if (isSelected)
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.primary,
-                  width: 3,
-                ),
-              ),
-            ),
-            
-          // Label
-          Positioned(
-            top: 8,
-            left: 8,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: isSelected ? Theme.of(context).colorScheme.primary : Colors.black.withValues(alpha: 0.8),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                'VMAF ${vmafTarget.toInt()}',
-                style: TextStyle(
-                  color: isSelected ? Colors.black : Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ),
-        ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.black.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: isSelected ? Colors.transparent : Colors.white38),
+      ),
+      child: Text(
+        'VMAF ${vmafTarget.toInt()}',
+        style: TextStyle(
+          color: isSelected ? Colors.black : Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 12,
+        ),
       ),
     );
+  }
+
+  Widget _buildSelectionHighlight(double left, double top, double right, double bottom, BoxConstraints constraints) {
+    return Positioned(
+      left: constraints.maxWidth * left,
+      top: constraints.maxHeight * top,
+      width: constraints.maxWidth * (right - left),
+      height: constraints.maxHeight * (bottom - top),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuadClipper extends CustomClipper<Rect> {
+  final double left;
+  final double top;
+  final double right;
+  final double bottom;
+
+  _QuadClipper(this.left, this.top, this.right, this.bottom);
+
+  @override
+  Rect getClip(Size size) {
+    return Rect.fromLTRB(
+      size.width * left,
+      size.height * top,
+      size.width * right,
+      size.height * bottom,
+    );
+  }
+
+  @override
+  bool shouldReclip(_QuadClipper oldClipper) {
+    return left != oldClipper.left ||
+           top != oldClipper.top ||
+           right != oldClipper.right ||
+           bottom != oldClipper.bottom;
   }
 }
