@@ -7,9 +7,9 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../providers/execution_provider.dart';
 import '../../providers/navigation_provider.dart';
 import '../../services/vapoursynth_service.dart';
+import '../../services/preview_service.dart';
 import '../widgets/ez_panel.dart';
 import '../widgets/ez_slider.dart';
-
 import '../../providers/workflow_provider.dart';
 
 class Phase1TextureView extends ConsumerStatefulWidget {
@@ -30,7 +30,9 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
   double _splitPosition = 0.5; // 0.0 to 1.0 (50% default)
   Timer? _debounce;
   bool _isCompilingScript = false;
+  bool _isLoadingSnippet = false;
   String? _currentVideoPath;
+  String? _snippetPath;
   final List<StreamSubscription> _subscriptions = [];
 
   @override
@@ -57,27 +59,6 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
       }
     }));
     
-    // Snippet loop enforcer
-    _subscriptions.add(_originalPlayer.stream.position.listen((pos) {
-      if (!mounted) return;
-      if (_snippetStart != null && pos >= _snippetEnd!) {
-        _originalPlayer.seek(_snippetStart!);
-        _filteredPlayer.seek(_snippetStart!);
-      }
-    }));
-    
-    // Setup snippet once duration is known
-    _subscriptions.add(_originalPlayer.stream.duration.listen((duration) {
-      if (!mounted) return;
-      if (_snippetStart == null && duration.inSeconds > 10) {
-        // Start 20% into the video
-        _snippetStart = Duration(milliseconds: (duration.inMilliseconds * 0.2).round());
-        _snippetEnd = _snippetStart! + const Duration(seconds: 5);
-        _originalPlayer.seek(_snippetStart!);
-        _filteredPlayer.seek(_snippetStart!);
-      }
-    }));
-    
     // Load initial media after first frame when ref is available
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final savedDenoise = ref.read(workflowProvider).denoiseStrength;
@@ -89,18 +70,27 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
       _initMedia();
     });
   }
-  
-  Duration? _snippetStart;
-  Duration? _snippetEnd;
 
   Future<void> _initMedia() async {
     final batchFiles = ref.read(workflowProvider).batchFiles;
     if (batchFiles.isNotEmpty) {
       _currentVideoPath = batchFiles.first;
+      if (mounted) setState(() => _isLoadingSnippet = true);
       
-      // Load the exact same original video in both players
-      await _originalPlayer.open(Media(_currentVideoPath!), play: true);
-      await _filteredPlayer.open(Media(_currentVideoPath!), play: true);
+      try {
+        _snippetPath = await PreviewService.extractKeyframeSnippet(_currentVideoPath!);
+      } catch (e) {
+        debugPrint('Snippet extraction error: $e');
+        _snippetPath = _currentVideoPath;
+      } finally {
+        if (mounted) setState(() => _isLoadingSnippet = false);
+      }
+      
+      final mediaPath = _snippetPath ?? _currentVideoPath!;
+      
+      // Load the exact same snippet video in both players
+      await _originalPlayer.open(Media(mediaPath), play: true);
+      await _filteredPlayer.open(Media(mediaPath), play: true);
       
       // Initially set an empty script just to initialize the filter chain
       try {
@@ -311,11 +301,23 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
                             ),
                             
                             // Loading Overlay
-                            if (_isCompilingScript)
+                            if (_isCompilingScript || _isLoadingSnippet)
                               Container(
                                 color: Colors.black.withValues(alpha: 0.5),
-                                child: const Center(
-                                  child: CircularProgressIndicator(),
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const CircularProgressIndicator(),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        _isLoadingSnippet
+                                            ? 'Extracting Lossless Keyframe Snippet...'
+                                            : 'Updating VapourSynth Script...',
+                                        style: const TextStyle(color: Colors.white70, fontSize: 13),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                           ],
@@ -349,7 +351,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
                           ),
                           const SizedBox(height: 16),
                           const Text(
-                            'Drag the slider to preview KNLMeansCL denoise. Drag the center divider to compare Original vs Denoised. The exact noise removed will be predicted and added synthetically by AV1.',
+                            'Drag the slider to preview KNLMeansCL denoise on the extracted keyframe snippet. Drag the center divider to compare Original vs Denoised.',
                             style: TextStyle(fontSize: 12, color: Colors.grey, height: 1.5),
                           ),
                         ],

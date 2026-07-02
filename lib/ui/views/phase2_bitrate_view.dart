@@ -9,6 +9,7 @@ import '../../providers/navigation_provider.dart';
 import '../../providers/workflow_provider.dart';
 import '../../providers/batch_queue_provider.dart';
 import '../../models/preset_model.dart';
+import '../../services/preview_service.dart';
 import '../widgets/ez_panel.dart';
 
 class Phase2BitrateView extends ConsumerStatefulWidget {
@@ -28,6 +29,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   int _selectedTargetIndex = 2; // Default to 95.0
   bool _isPlaying = true;
   bool _smartReveal = false;
+  bool _isLoadingSnippet = false;
   
   // Wipe crosshair coordinates (0.0 to 1.0)
   double _splitX = 0.5;
@@ -38,7 +40,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     super.initState();
     // Initialize 4 players
     for (int i = 0; i < 4; i++) {
-      final player = Player(); // media_kit defaults to optimal settings
+      final player = Player();
       _players[i] = player;
       _controllers[i] = VideoController(player);
       
@@ -50,31 +52,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initMedia();
     });
-
-    if (_players[0] != null) {
-      // Snippet loop enforcer
-      _subscriptions.add(_players[0]!.stream.position.listen((pos) {
-        if (!mounted) return;
-        if (_snippetStart != null && pos >= _snippetEnd!) {
-          _syncSeek(_snippetStart!);
-        }
-      }));
-      
-      // Setup snippet once duration is known
-      _subscriptions.add(_players[0]!.stream.duration.listen((duration) {
-        if (!mounted) return;
-        if (_snippetStart == null && duration.inSeconds > 10) {
-          // Start 20% into the video
-          _snippetStart = Duration(milliseconds: (duration.inMilliseconds * 0.2).round());
-          _snippetEnd = _snippetStart! + const Duration(seconds: 5);
-          _syncSeek(_snippetStart!);
-        }
-      }));
-    }
   }
-  
-  Duration? _snippetStart;
-  Duration? _snippetEnd;
 
   void _initMedia() async {
     final batchFiles = ref.read(workflowProvider).batchFiles;
@@ -83,6 +61,17 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     }
     
     final currentVideoPath = batchFiles.first;
+    if (mounted) setState(() => _isLoadingSnippet = true);
+    
+    String snippetPath;
+    try {
+      snippetPath = await PreviewService.extractKeyframeSnippet(currentVideoPath);
+    } catch (e) {
+      debugPrint('Snippet extraction error in Phase 2: $e');
+      snippetPath = currentVideoPath;
+    } finally {
+      if (mounted) setState(() => _isLoadingSnippet = false);
+    }
     
     // Video filter profiles simulating visual compression across the 4 quad panes
     final filterProfiles = [
@@ -95,7 +84,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     for (int i = 0; i < 4; i++) {
       final player = _players[i];
       if (player != null) {
-        await player.open(Media(currentVideoPath), play: _isPlaying);
+        await player.open(Media(snippetPath), play: _isPlaying);
         if (player.platform is NativePlayer && filterProfiles[i].isNotEmpty) {
           try {
             await (player.platform as NativePlayer).setProperty('vf', filterProfiles[i]);
@@ -370,6 +359,24 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                   Positioned(top: 16, right: 16, child: _buildLabel(1)),
                                   Positioned(bottom: 16, left: 16, child: _buildLabel(2)),
                                   Positioned(bottom: 16, right: 16, child: _buildLabel(3)),
+                                  
+                                  if (_isLoadingSnippet)
+                                    Container(
+                                      color: Colors.black.withValues(alpha: 0.5),
+                                      child: const Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            CircularProgressIndicator(),
+                                            SizedBox(height: 12),
+                                            Text(
+                                              'Extracting Keyframe Snippet for Quad-Split...',
+                                              style: TextStyle(color: Colors.white70, fontSize: 13),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             );
