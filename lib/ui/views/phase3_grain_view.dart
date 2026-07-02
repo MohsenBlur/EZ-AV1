@@ -11,6 +11,7 @@ import '../../providers/execution_provider.dart';
 import '../../providers/navigation_provider.dart';
 import '../../providers/workflow_provider.dart';
 import '../../providers/batch_queue_provider.dart';
+import '../../providers/preset_provider.dart';
 import '../../models/preset_model.dart';
 import '../../services/preview_service.dart';
 import '../../services/vapoursynth_service.dart';
@@ -41,7 +42,7 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
   MediaColorProfile? _colorProfile;
 
   double _sliderPos = 0.5;
-  int _grainStrength = 15; // 0 = Off, 1-50 = SVT-AV1 Photon Noise
+  int _grainStrength = 15;
 
   @override
   void initState() {
@@ -56,7 +57,6 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
     _grainPlayer.setPlaylistMode(PlaylistMode.loop);
     _grainPlayer.setVolume(0.0);
 
-    // Initial grain strength mapped from Phase 1 denoise strength or default 15
     final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
     if (denoiseStrength > 0) {
       _grainStrength = Av1anService.calculatePhotonNoise(denoiseStrength);
@@ -128,11 +128,9 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
       final targetVmaf = ref.read(workflowProvider).targetVmaf;
       final crf = _vmafToSvtCrf(targetVmaf);
 
-      // 1. Render Clean AV1 Encode (Left side, grain = 0)
       final cleanPath = p.join(tempDir.path, 'ez_av1_phase3_clean_${targetVmaf.toInt()}.mp4');
       await _renderSvtAv1Pane(baseSnippet, cleanPath, crf, photonNoise: 0);
 
-      // 2. Render Grain-Synthesized AV1 Encode (Right side, grain = _grainStrength)
       final grainPath = p.join(tempDir.path, 'ez_av1_phase3_grain_$_grainStrength.mp4');
       await _renderSvtAv1Pane(baseSnippet, grainPath, crf, photonNoise: _grainStrength);
 
@@ -286,6 +284,71 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
     });
   }
 
+  void _showSavePresetDialog() {
+    final messenger = ScaffoldMessenger.of(context);
+    final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
+    final targetVmaf = ref.read(workflowProvider).targetVmaf;
+    final nameController = TextEditingController(
+      text: 'My Preset (VMAF ${targetVmaf.toInt()} Grain $_grainStrength)',
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF181818),
+        title: const Text('Save Custom Preset', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Give your tuned preset a descriptive name for future use:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameController,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Preset Name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              if (name.isNotEmpty) {
+                Navigator.of(context).pop();
+                await ref.read(presetProvider.notifier).createAndSavePreset(
+                  name: name,
+                  denoiseStrength: denoiseStrength,
+                  targetVmaf: targetVmaf,
+                  photonNoise: _grainStrength,
+                );
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text('Preset "$name" saved successfully!'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Save Preset'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _debounceTimer?.cancel();
@@ -421,6 +484,16 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
                   ),
                 ),
                 const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: _showSavePresetDialog,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white38),
+                  ),
+                  icon: const Icon(Icons.bookmark_add_rounded, size: 16),
+                  label: const Text('SAVE AS PRESET'),
+                ),
+                const SizedBox(width: 12),
                 ElevatedButton.icon(
                   onPressed: () {
                     final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
