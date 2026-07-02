@@ -35,10 +35,11 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   int _selectedTargetIndex = 2; // Default to Pane 2
   
   bool _isPlaying = true;
-  bool _smartReveal = false; // False = Film Grain Synthesis Active, True = Grain Bypassed (Clean Video)
+  bool _smartReveal = false; // False = Grain Synthesis Active (Smooth Filmic), True = Grain Bypassed (Raw Compressed Stream)
   bool _isProcessingPipeline = false;
   String? _currentVideoPath;
   String? _denoisedSnippetPath;
+  MediaColorProfile? _colorProfile;
   
   double _splitX = 0.5;
   double _splitY = 0.5;
@@ -101,7 +102,10 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     if (mounted) setState(() => _isProcessingPipeline = true);
     
     try {
-      // 1. Extract keyframe snippet with BT.709 color calibration
+      // 0. Detect exact source color profile
+      _colorProfile = await PreviewService.detectColorProfile(_currentVideoPath!);
+
+      // 1. Extract keyframe snippet with native color calibration
       final snippetPath = await PreviewService.extractKeyframeSnippet(_currentVideoPath!);
       if (!File(snippetPath).existsSync()) return;
 
@@ -120,7 +124,11 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       );
 
       final denoisedPath = p.join(tempDir.path, 'ez_av1_phase2_denoised.mp4');
-      _denoisedSnippetPath = await VapourSynthService.renderDenoisedPreview(scriptPath, denoisedPath);
+      _denoisedSnippetPath = await VapourSynthService.renderDenoisedPreview(
+        scriptPath,
+        denoisedPath,
+        colorProfile: _colorProfile,
+      );
 
       final baseSnippet = File(_denoisedSnippetPath!).existsSync() ? _denoisedSnippetPath! : snippetPath;
 
@@ -148,8 +156,8 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   Future<void> _renderComparisonPane(String inputPath, String outputPath, int crf) async {
     final vfList = <String>[];
     if (!_smartReveal) {
-      // Grain Synthesis simulation overlay matching SVT-AV1 photon-noise
-      vfList.add('noise=alls=12:allf=t+u');
+      // Grain Synthesis simulation overlay matching SVT-AV1 photon-noise (subtle organic film grain)
+      vfList.add('noise=alls=2:allf=t+u');
     }
 
     final vfString = vfList.isNotEmpty ? vfList.join(',') : null;
@@ -162,10 +170,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       '-preset', 'ultrafast',
       '-crf', '$crf',
       '-pix_fmt', 'yuv420p',
-      '-color_range', '1',
-      '-colorspace', '1',
-      '-color_primaries', '1',
-      '-color_trc', '1',
+      if (_colorProfile != null) ..._colorProfile!.toFfmpegArgs(),
       '-an',
       outputPath,
     ];

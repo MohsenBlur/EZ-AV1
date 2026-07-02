@@ -125,9 +125,14 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
         sourceFilePath: snippetPath,
       );
 
+      final colorProfile = _currentVideoPath != null
+          ? await PreviewService.detectColorProfile(_currentVideoPath!)
+          : null;
+
       final renderedPath = await VapourSynthService.renderDenoisedPreview(
         scriptPath,
         _denoisedPreviewPath!,
+        colorProfile: colorProfile,
       );
 
       if (!mounted) return;

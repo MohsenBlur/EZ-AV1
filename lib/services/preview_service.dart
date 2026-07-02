@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
@@ -5,8 +6,86 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'environment_service.dart';
 
+class MediaColorProfile {
+  final String? colorSpace;
+  final String? colorTransfer;
+  final String? colorPrimaries;
+  final String? colorRange;
+
+  const MediaColorProfile({
+    this.colorSpace,
+    this.colorTransfer,
+    this.colorPrimaries,
+    this.colorRange,
+  });
+
+  List<String> toFfmpegArgs() {
+    final args = <String>[];
+    if (colorSpace != null && colorSpace != 'unknown' && colorSpace != 'unspecified') {
+      args.addAll(['-colorspace', colorSpace!]);
+    }
+    if (colorTransfer != null && colorTransfer != 'unknown' && colorTransfer != 'unspecified') {
+      args.addAll(['-color_trc', colorTransfer!]);
+    }
+    if (colorPrimaries != null && colorPrimaries != 'unknown' && colorPrimaries != 'unspecified') {
+      args.addAll(['-color_primaries', colorPrimaries!]);
+    }
+    if (colorRange != null && colorRange != 'unknown' && colorRange != 'unspecified') {
+      args.addAll(['-color_range', colorRange!]);
+    }
+    return args;
+  }
+}
+
 class PreviewService {
   static final Map<String, String> _snippetCache = {};
+  static final Map<String, MediaColorProfile> _profileCache = {};
+
+  /// Probes exact color space, transfer, primaries, and range attributes of [videoPath] using ffprobe (0 guessing).
+  static Future<MediaColorProfile> detectColorProfile(String videoPath) async {
+    if (videoPath.isEmpty || !File(videoPath).existsSync()) {
+      return const MediaColorProfile();
+    }
+
+    if (_profileCache.containsKey(videoPath)) {
+      return _profileCache[videoPath]!;
+    }
+
+    try {
+      final result = await Process.run(
+        EnvironmentService.ffprobePath,
+        [
+          '-v', 'error',
+          '-select_streams', 'v:0',
+          '-show_entries', 'stream=color_space,color_transfer,color_primaries,color_range',
+          '-of', 'json',
+          videoPath,
+        ],
+        environment: EnvironmentService.processEnvironment,
+      );
+
+      if (result.exitCode == 0) {
+        final Map<String, dynamic> data = json.decode(result.stdout as String);
+        final streams = data['streams'] as List<dynamic>?;
+        if (streams != null && streams.isNotEmpty) {
+          final s = streams.first as Map<String, dynamic>;
+          final profile = MediaColorProfile(
+            colorSpace: s['color_space']?.toString(),
+            colorTransfer: s['color_transfer']?.toString(),
+            colorPrimaries: s['color_primaries']?.toString(),
+            colorRange: s['color_range']?.toString(),
+          );
+          _profileCache[videoPath] = profile;
+          debugPrint('[PreviewService] Probed source color profile for $videoPath: space=${profile.colorSpace}, trc=${profile.colorTransfer}, primaries=${profile.colorPrimaries}, range=${profile.colorRange}');
+          return profile;
+        }
+      }
+    } catch (e) {
+      debugPrint('[PreviewService] Color profile probe exception: $e');
+    }
+
+    return const MediaColorProfile();
+  }
 
   /// Multi-fallback container duration probing in seconds (~5ms execution).
   static Future<double> getVideoDuration(String videoPath) async {
@@ -82,7 +161,7 @@ class PreviewService {
   }
 
   /// Extracts a keyframe-aligned snippet from [videoPath] of approximately [targetDurationSec] seconds.
-  /// Enforces BT.709 yuv420p color calibration to ensure 100% color and contrast parity between original and denoised layers.
+  /// Dynamically detects and matches the source video's native color profile (zero guessing).
   static Future<String> extractKeyframeSnippet(
     String videoPath, {
     double targetDurationSec = 3.0,
@@ -103,6 +182,8 @@ class PreviewService {
         return cachedPath;
       }
     }
+
+    final profile = await detectColorProfile(videoPath);
 
     Directory tempDir;
     try {
@@ -134,16 +215,13 @@ class PreviewService {
       '-preset', 'ultrafast',
       '-crf', '18',
       '-pix_fmt', 'yuv420p',
-      '-color_range', '1',
-      '-colorspace', '1',
-      '-color_primaries', '1',
-      '-color_trc', '1',
+      ...profile.toFfmpegArgs(),
       '-an',
       '-y',
       outputPath,
     ];
 
-    debugPrint('[PreviewService] Executing FFmpeg keyframe extraction with BT.709 color calibration: ${args.join(" ")}');
+    debugPrint('[PreviewService] Executing FFmpeg keyframe extraction with detected color profile: ${args.join(" ")}');
 
     try {
       final result = await Process.run(
@@ -170,5 +248,6 @@ class PreviewService {
   /// Clears the in-memory snippet cache.
   static void clearCache() {
     _snippetCache.clear();
+    _profileCache.clear();
   }
 }

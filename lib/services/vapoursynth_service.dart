@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'environment_service.dart';
+import 'preview_service.dart';
 
 class VapourSynthService {
   /// Generates a VapourSynth .vpy script for previewing denoise filter strength.
@@ -97,8 +98,12 @@ denoised.set_output()
   }
 
   /// Renders a VapourSynth .vpy script to a preview MP4 file using VSPipe piped into FFmpeg (~0.15s).
-  /// Enforces BT.709 yuv420p color calibration and drains process stderr streams to prevent deadlocks.
-  static Future<String> renderDenoisedPreview(String scriptPath, String outputPath) async {
+  /// Dynamically applies the detected [colorProfile] of the source video (zero guessing).
+  static Future<String> renderDenoisedPreview(
+    String scriptPath,
+    String outputPath, {
+    MediaColorProfile? colorProfile,
+  }) async {
     final stopwatch = Stopwatch()..start();
     debugPrint('[VapourSynthService] Rendering preview script to MP4: $scriptPath -> $outputPath');
 
@@ -111,10 +116,7 @@ denoised.set_output()
       '-preset', 'ultrafast',
       '-crf', '18',
       '-pix_fmt', 'yuv420p',
-      '-color_range', '1',
-      '-colorspace', '1',
-      '-color_primaries', '1',
-      '-color_trc', '1',
+      if (colorProfile != null) ...colorProfile.toFfmpegArgs(),
       '-an',
       outputPath,
     ];
