@@ -87,11 +87,18 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
   void _syncJobsFromQueue(List<BatchNode> nodes) {
     final files = BatchNode.extractFileNodes(nodes);
 
-    // Smart Merge: Retain existing state for known IDs
-    final existingJobs = {for (var j in state.jobs) j.id: j};
-    final newJobs = files.map((f) {
-      if (existingJobs.containsKey(f.id)) {
-        return existingJobs[f.id]!.copyWith(node: f); // Update node but keep status/logs
+    // Group & deduplicate by absolutePath so render queue NEVER contains duplicate jobs for the same file
+    final uniqueFilesByPath = <String, FileNode>{};
+    for (final f in files) {
+      if (!uniqueFilesByPath.containsKey(f.absolutePath)) {
+        uniqueFilesByPath[f.absolutePath] = f;
+      }
+    }
+
+    final existingJobs = {for (var j in state.jobs) (j.node as FileNode).absolutePath: j};
+    final newJobs = uniqueFilesByPath.values.map((f) {
+      if (existingJobs.containsKey(f.absolutePath)) {
+        return existingJobs[f.absolutePath]!.copyWith(node: f);
       }
       return ExecutionJob(id: f.id, node: f);
     }).toList();

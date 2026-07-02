@@ -39,23 +39,43 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
         final List<dynamic> jsonList = jsonDecode(content);
         final diskNodes = jsonList.map((e) => BatchNode.fromJson(e as Map<String, dynamic>)).toList();
 
-        // Prune any nodes whose underlying files/directories no longer exist on disk
+        // Prune non-existent disk files
         final validNodes = _filterExistingNodes(diskNodes);
 
-        // Deduplicate by absolutePath
-        final existingPaths = BatchNode.extractFileNodes(state).map((n) => n.absolutePath).toSet();
-        final uniqueDiskNodes = validNodes.where((n) {
-          if (n is FileNode) return !existingPaths.contains(n.absolutePath);
-          return true;
-        }).toList();
-
-        state = [...uniqueDiskNodes, ...state];
+        // Deduplicate merged disk nodes + in-memory nodes by absolutePath
+        final merged = [...validNodes, ...state];
+        state = _deduplicateNodes(merged);
         _recalculateState();
         _saveState();
       }
     } catch (e) {
       // Ignore load errors, start fresh
     }
+  }
+
+  List<BatchNode> _deduplicateNodes(List<BatchNode> nodes) {
+    final seenPaths = <String>{};
+    final result = <BatchNode>[];
+    for (final node in nodes) {
+      if (node is FileNode) {
+        if (!seenPaths.contains(node.absolutePath)) {
+          seenPaths.add(node.absolutePath);
+          result.add(node);
+        }
+      } else if (node is DirectoryNode) {
+        final uniqueChildren = _deduplicateNodes(node.children);
+        if (uniqueChildren.isNotEmpty) {
+          result.add(DirectoryNode(
+            id: node.id,
+            name: node.name,
+            absolutePath: node.absolutePath,
+            assignedPreset: node.assignedPreset,
+            children: uniqueChildren,
+          ));
+        }
+      }
+    }
+    return result;
   }
 
   List<BatchNode> _filterExistingNodes(List<BatchNode> nodes) {
@@ -107,15 +127,8 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     if (!await dir.exists()) return;
 
     final rootNodes = await _parseDirectory(dir);
-    
-    // Filter duplicates
-    final existingPaths = BatchNode.extractFileNodes(state).map((n) => n.absolutePath).toSet();
-    final uniqueNodes = rootNodes.where((n) {
-      if (n is FileNode) return !existingPaths.contains(n.absolutePath);
-      return true;
-    }).toList();
-
-    state = [...state, ...uniqueNodes];
+    final merged = [...state, ...rootNodes];
+    state = _deduplicateNodes(merged);
     _recalculateState();
     _saveState();
   }
@@ -143,7 +156,8 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     }
 
     if (newNodes.isNotEmpty) {
-      state = [...state, ...newNodes];
+      final merged = [...state, ...newNodes];
+      state = _deduplicateNodes(merged);
       _recalculateState();
       _saveState();
     }
