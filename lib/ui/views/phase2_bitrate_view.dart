@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,6 +22,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   // 4 players for the Quad-Split comparison
   final Map<int, Player> _players = {};
   final Map<int, VideoController> _controllers = {};
+  final List<StreamSubscription> _subscriptions = [];
   
   final List<double> _vmafTargets = [91.0, 93.0, 95.0, 97.0];
   int _selectedTargetIndex = 2; // Default to 95.0
@@ -49,22 +51,26 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       _initMedia();
     });
 
-    // Snippet loop enforcer
-    _players[0]?.stream.position.listen((pos) {
-      if (_snippetStart != null && pos >= _snippetEnd!) {
-        _syncSeek(_snippetStart!);
-      }
-    });
-    
-    // Setup snippet once duration is known
-    _players[0]?.stream.duration.listen((duration) {
-      if (_snippetStart == null && duration.inSeconds > 10) {
-        // Start 20% into the video
-        _snippetStart = Duration(milliseconds: (duration.inMilliseconds * 0.2).round());
-        _snippetEnd = _snippetStart! + const Duration(seconds: 5);
-        _syncSeek(_snippetStart!);
-      }
-    });
+    if (_players[0] != null) {
+      // Snippet loop enforcer
+      _subscriptions.add(_players[0]!.stream.position.listen((pos) {
+        if (!mounted) return;
+        if (_snippetStart != null && pos >= _snippetEnd!) {
+          _syncSeek(_snippetStart!);
+        }
+      }));
+      
+      // Setup snippet once duration is known
+      _subscriptions.add(_players[0]!.stream.duration.listen((duration) {
+        if (!mounted) return;
+        if (_snippetStart == null && duration.inSeconds > 10) {
+          // Start 20% into the video
+          _snippetStart = Duration(milliseconds: (duration.inMilliseconds * 0.2).round());
+          _snippetEnd = _snippetStart! + const Duration(seconds: 5);
+          _syncSeek(_snippetStart!);
+        }
+      }));
+    }
   }
   
   Duration? _snippetStart;
@@ -84,6 +90,10 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
 
   @override
   void dispose() {
+    for (final sub in _subscriptions) {
+      sub.cancel();
+    }
+    _subscriptions.clear();
     for (var player in _players.values) {
       player.dispose();
     }

@@ -31,6 +31,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
   Timer? _debounce;
   bool _isCompilingScript = false;
   String? _currentVideoPath;
+  final List<StreamSubscription> _subscriptions = [];
 
   @override
   void initState() {
@@ -49,22 +50,25 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     _filteredPlayer.setVolume(0.0);
     
     // Debug Logging for VapourSynth filter diagnostics
-    _filteredPlayer.stream.log.listen((event) {
+    _subscriptions.add(_filteredPlayer.stream.log.listen((event) {
+      if (!mounted) return;
       if (event.text.toLowerCase().contains('vapoursynth') || event.text.toLowerCase().contains('vf')) {
         debugPrint('MPV Filter Log: ${event.level} - ${event.text}');
       }
-    });
+    }));
     
     // Snippet loop enforcer
-    _originalPlayer.stream.position.listen((pos) {
+    _subscriptions.add(_originalPlayer.stream.position.listen((pos) {
+      if (!mounted) return;
       if (_snippetStart != null && pos >= _snippetEnd!) {
         _originalPlayer.seek(_snippetStart!);
         _filteredPlayer.seek(_snippetStart!);
       }
-    });
+    }));
     
     // Setup snippet once duration is known
-    _originalPlayer.stream.duration.listen((duration) {
+    _subscriptions.add(_originalPlayer.stream.duration.listen((duration) {
+      if (!mounted) return;
       if (_snippetStart == null && duration.inSeconds > 10) {
         // Start 20% into the video
         _snippetStart = Duration(milliseconds: (duration.inMilliseconds * 0.2).round());
@@ -72,7 +76,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
         _originalPlayer.seek(_snippetStart!);
         _filteredPlayer.seek(_snippetStart!);
       }
-    });
+    }));
     
     // Load initial media after first frame when ref is available
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -118,6 +122,10 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
 
   @override
   void dispose() {
+    for (final sub in _subscriptions) {
+      sub.cancel();
+    }
+    _subscriptions.clear();
     _debounce?.cancel();
     _originalPlayer.dispose();
     _filteredPlayer.dispose();
