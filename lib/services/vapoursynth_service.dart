@@ -97,6 +97,17 @@ denoised.set_output()
     return scriptFile.path;
   }
 
+  static Future<void> _killProcess(Process? p) async {
+    if (p == null) return;
+    try {
+      if (Platform.isWindows) {
+        await Process.run('taskkill', ['/F', '/T', '/PID', p.pid.toString()]);
+      } else {
+        p.kill();
+      }
+    } catch (_) {}
+  }
+
   /// Renders a VapourSynth .vpy script to a preview MP4 file using VSPipe piped into FFmpeg (~0.15s).
   /// Dynamically applies the detected [colorProfile] of the source video (zero guessing).
   static Future<String> renderDenoisedPreview(
@@ -121,15 +132,18 @@ denoised.set_output()
       outputPath,
     ];
 
+    Process? p1;
+    Process? p2;
+
     try {
-      final p1 = await Process.start(
+      p1 = await Process.start(
         vsPipePath,
         vsPipeArgs,
         environment: EnvironmentService.processEnvironment,
         workingDirectory: EnvironmentService.pythonDirectory,
       );
 
-      final p2 = await Process.start(
+      p2 = await Process.start(
         EnvironmentService.ffmpegPath,
         ffmpegArgs,
         environment: EnvironmentService.processEnvironment,
@@ -147,8 +161,8 @@ denoised.set_output()
         const Duration(seconds: 15),
         onTimeout: () {
           debugPrint('[VapourSynthService] Render timed out after 15s');
-          p1.kill();
-          p2.kill();
+          _killProcess(p1);
+          _killProcess(p2);
           return -1;
         },
       );
@@ -163,6 +177,8 @@ denoised.set_output()
       }
     } catch (e) {
       debugPrint('[VapourSynthService] Render exception: $e');
+      _killProcess(p1);
+      _killProcess(p2);
     }
 
     return outputPath;

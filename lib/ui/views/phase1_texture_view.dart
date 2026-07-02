@@ -29,6 +29,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
   late final Player _filteredPlayer;
   late final VideoController _filteredController;
   
+  final Set<Process> _activeProcesses = {};
   double _denoiseStrength = 0.0;
   double _splitPosition = 0.5; // 0.0 to 1.0 (50% default)
   Timer? _debounce;
@@ -75,7 +76,21 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     });
   }
 
+  void _killActiveProcesses() {
+    for (final proc in _activeProcesses) {
+      try {
+        if (Platform.isWindows) {
+          Process.run('taskkill', ['/F', '/T', '/PID', proc.pid.toString()]);
+        } else {
+          proc.kill();
+        }
+      } catch (_) {}
+    }
+    _activeProcesses.clear();
+  }
+
   Future<void> _initMedia() async {
+    _killActiveProcesses();
     final batchFiles = ref.read(workflowProvider).batchFiles;
     if (batchFiles.isNotEmpty) {
       final validFiles = batchFiles.where((f) => File(f).existsSync()).toList();
@@ -155,6 +170,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
 
   @override
   void dispose() {
+    _killActiveProcesses();
     for (final sub in _subscriptions) {
       sub.cancel();
     }
@@ -172,6 +188,8 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     
     // Debounce preview rendering
     if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _killActiveProcesses();
+
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       if (_snippetPath != null || _currentVideoPath != null) {
         final targetPath = _snippetPath ?? _currentVideoPath!;
@@ -212,7 +230,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
               ),
               const SizedBox(height: 32),
               OutlinedButton.icon(
-                onPressed: () => ref.read(selectedTabProvider.notifier).setTab(3),
+                onPressed: () => ref.read(selectedTabProvider.notifier).setTab(5),
                 icon: const Icon(Icons.visibility_rounded),
                 label: const Text('View Render Progress'),
                 style: OutlinedButton.styleFrom(
@@ -295,6 +313,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
               const Spacer(),
               ElevatedButton.icon(
                 onPressed: () {
+                  _killActiveProcesses();
                   ref.read(workflowProvider.notifier).completePhase1(_denoiseStrength);
                   ref.read(selectedTabProvider.notifier).setTab(3); // Bitrate
                 },
