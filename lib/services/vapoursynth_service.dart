@@ -30,7 +30,14 @@ class VapourSynthService {
         pythonScript = '''
 import vapoursynth as vs
 core = vs.core
-clip = core.bs.VideoSource(source=r"$escapedSource")
+try:
+    clip = core.lsmas.LWLibavSource(source=r"$escapedSource")
+except Exception:
+    try:
+        clip = core.bs.VideoSource(source=r"$escapedSource")
+    except Exception:
+        clip = core.ffms2.Source(source=r"$escapedSource")
+
 clip.set_output()
 ''';
       } else {
@@ -50,18 +57,18 @@ clip.set_output()
 import vapoursynth as vs
 core = vs.core
 try:
-    clip = core.bs.VideoSource(source=r"$escapedSource")
+    clip = core.lsmas.LWLibavSource(source=r"$escapedSource")
 except Exception:
     try:
-        clip = core.ffms2.Source(source=r"$escapedSource")
+        clip = core.bs.VideoSource(source=r"$escapedSource")
     except Exception:
-        clip = core.lsmas.LWLibavSource(source=r"$escapedSource")
+        clip = core.ffms2.Source(source=r"$escapedSource")
 
 try:
     core.std.LoadPlugin(r"$escapedKnlPath")
-    denoised = core.knlm.KNLMeansCL(clip, d=$d, a=2, s=4, h=$h)
+    denoised = core.knlm.KNLMeansCL(clip, d=$d, a=2, s=4, h=$h, channels="Y")
 except Exception as e:
-    denoised = core.std.Bilateral(clip, sigmaS=$d.0, sigmaR=0.1)
+    denoised = core.std.Convolution(clip, matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1])
     denoised = core.text.Text(denoised, f"GPU Denoise Fallback: {e}")
 
 denoised.set_output()
@@ -74,9 +81,9 @@ clip = video_in
 
 try:
     core.std.LoadPlugin(r"$escapedKnlPath")
-    denoised = core.knlm.KNLMeansCL(clip, d=$d, a=2, s=4, h=$h)
+    denoised = core.knlm.KNLMeansCL(clip, d=$d, a=2, s=4, h=$h, channels="Y")
 except Exception as e:
-    denoised = core.std.Bilateral(clip, sigmaS=$d.0, sigmaR=0.1)
+    denoised = core.std.Convolution(clip, matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1])
     denoised = core.text.Text(denoised, f"GPU Denoise Fallback: {e}")
 
 denoised.set_output()
@@ -89,7 +96,7 @@ denoised.set_output()
   }
 
   /// Renders a VapourSynth .vpy script to a preview MP4 file using VSPipe piped into FFmpeg (~0.15s).
-  /// Drains process stderr streams to prevent OS pipe deadlock and includes a 10s execution timeout.
+  /// Enforces BT.709 yuv420p color calibration and drains process stderr streams to prevent deadlocks.
   static Future<String> renderDenoisedPreview(String scriptPath, String outputPath) async {
     final stopwatch = Stopwatch()..start();
     debugPrint('[VapourSynthService] Rendering preview script to MP4: $scriptPath -> $outputPath');
@@ -99,7 +106,9 @@ denoised.set_output()
     final ffmpegArgs = <String>[
       '-y',
       '-i', '-',
+      '-vf', 'scale=out_color_matrix=bt709:out_range=limited',
       '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
       '-preset', 'ultrafast',
       '-crf', '18',
       '-an',
@@ -120,17 +129,18 @@ denoised.set_output()
         environment: EnvironmentService.processEnvironment,
       );
 
-      // Drain stderr streams to prevent OS pipe buffer deadlock
-      p1.stderr.listen((data) {});
-      p2.stderr.listen((data) {});
+      final vsPipeErr = StringBuffer();
+      final ffmpegErr = StringBuffer();
 
-      // Pipe VSPipe stdout into FFmpeg stdin and await completion
+      p1.stderr.listen((data) => vsPipeErr.write(String.fromCharCodes(data)));
+      p2.stderr.listen((data) => ffmpegErr.write(String.fromCharCodes(data)));
+
       await p1.stdout.pipe(p2.stdin);
 
       final exitCode = await p2.exitCode.timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 15),
         onTimeout: () {
-          debugPrint('[VapourSynthService] Render timed out after 10s');
+          debugPrint('[VapourSynthService] Render timed out after 15s');
           p1.kill();
           p2.kill();
           return -1;
@@ -143,7 +153,7 @@ denoised.set_output()
         debugPrint('[VapourSynthService] Denoised preview rendered successfully in ${stopwatch.elapsedMilliseconds}ms (${outputFile.lengthSync()} bytes)');
         return outputPath;
       } else {
-        debugPrint('[VapourSynthService] Render failed with exitCode: $exitCode');
+        debugPrint('[VapourSynthService] Render failed with exitCode: $exitCode. VSPipe err: $vsPipeErr, FFmpeg err: $ffmpegErr');
       }
     } catch (e) {
       debugPrint('[VapourSynthService] Render exception: $e');

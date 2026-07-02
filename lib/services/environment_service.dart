@@ -95,8 +95,7 @@ class EnvironmentService {
     NativePathHelper.setEnvVar('PYTHONPATH', pythonDirectory);
   }
 
-  /// Copies VapourSynth DLL dependencies to the target executable directory (e.g. Debug/Release runner folder)
-  /// so Windows OS DLL loader resolves VSScript.dll, python311.dll, and KNLMeansCL.dll natively.
+  /// Copies VapourSynth DLL dependencies and plugins to the target executable directory
   static void _syncBinariesToExeDir() {
     if (!Platform.isWindows) return;
     try {
@@ -123,6 +122,22 @@ class EnvironmentService {
           if (!target.existsSync() || target.lengthSync() != sourceFile.lengthSync()) {
             sourceFile.copySync(target.path);
             debugPrint('Synced $filename to executable directory: ${target.path}');
+          }
+        }
+      }
+
+      // Sync vapoursynth64 plugins directory (including LSMASHSource.dll)
+      final vsPluginsSrc = Directory(p.join(pythonDirectory, 'vapoursynth64', 'plugins'));
+      final vsPluginsTarget = Directory(p.join(exeDir, 'vapoursynth64', 'plugins'));
+      if (vsPluginsSrc.existsSync()) {
+        vsPluginsTarget.createSync(recursive: true);
+        for (final entity in vsPluginsSrc.listSync()) {
+          if (entity is File) {
+            final targetFile = File(p.join(vsPluginsTarget.path, p.basename(entity.path)));
+            if (!targetFile.existsSync() || targetFile.lengthSync() != entity.lengthSync()) {
+              entity.copySync(targetFile.path);
+              debugPrint('Synced plugin ${p.basename(entity.path)} to executable plugins dir: ${targetFile.path}');
+            }
           }
         }
       }

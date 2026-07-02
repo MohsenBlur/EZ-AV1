@@ -82,8 +82,7 @@ class PreviewService {
   }
 
   /// Extracts a keyframe-aligned snippet from [videoPath] of approximately [targetDurationSec] seconds.
-  /// Uses fast input seeking (-ss before -i) and stream copy (-c copy) to cut at keyframe boundaries instantly (~15ms).
-  /// Falls back to ultrafast re-encode if stream copy fails for exotic video containers.
+  /// Enforces BT.709 yuv420p color calibration to ensure 100% color and contrast parity between original and denoised layers.
   static Future<String> extractKeyframeSnippet(
     String videoPath, {
     double targetDurationSec = 3.0,
@@ -112,8 +111,7 @@ class PreviewService {
       tempDir = Directory.systemTemp;
     }
 
-    final ext = p.extension(videoPath).isNotEmpty ? p.extension(videoPath) : '.mp4';
-    final fileName = 'ez_av1_snippet_${videoPath.hashCode.abs()}$ext';
+    final fileName = 'ez_av1_snippet_${videoPath.hashCode.abs()}.mp4';
     final outputPath = p.join(tempDir.path, fileName);
 
     final totalDurationSec = await getVideoDuration(videoPath);
@@ -128,18 +126,21 @@ class PreviewService {
 
     debugPrint('[PreviewService] Selected target start timestamp: ${startSec.toStringAsFixed(2)}s (Target duration: ${targetDurationSec}s)');
 
-    // 1. Primary Attempt: Instant Keyframe Seek Stream Copy (-ss BEFORE -i seeks to nearest I-frame in ~10ms)
     final args = <String>[
       '-ss', startSec.toStringAsFixed(3),
       '-i', videoPath,
       '-t', targetDurationSec.toStringAsFixed(3),
-      '-c', 'copy',
-      '-avoid_negative_ts', 'make_zero',
+      '-vf', 'scale=out_color_matrix=bt709:out_range=limited',
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      '-preset', 'ultrafast',
+      '-crf', '18',
+      '-an',
       '-y',
       outputPath,
     ];
 
-    debugPrint('[PreviewService] Executing FFmpeg fast keyframe stream-copy: ${args.join(" ")}');
+    debugPrint('[PreviewService] Executing FFmpeg keyframe extraction with BT.709 color calibration: ${args.join(" ")}');
 
     try {
       final result = await Process.run(
@@ -154,41 +155,10 @@ class PreviewService {
         debugPrint('[PreviewService] Snippet extracted successfully in ${stopwatch.elapsedMilliseconds}ms (${outputFile.lengthSync()} bytes): $outputPath');
         return outputPath;
       } else {
-        debugPrint('[PreviewService] FFmpeg stream copy warning: exitCode=${result.exitCode}, stderr=${result.stderr}');
+        debugPrint('[PreviewService] FFmpeg extraction warning: exitCode=${result.exitCode}, stderr=${result.stderr}');
       }
     } catch (e) {
-      debugPrint('[PreviewService] FFmpeg stream copy exception: $e');
-    }
-
-    // 2. Fallback Attempt: Fast Re-encode if Stream Copy Fails
-    debugPrint('[PreviewService] Falling back to ultrafast re-encode...');
-    final fallbackArgs = <String>[
-      '-ss', startSec.toStringAsFixed(3),
-      '-i', videoPath,
-      '-t', targetDurationSec.toStringAsFixed(3),
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-crf', '18',
-      '-an',
-      '-y',
-      outputPath,
-    ];
-
-    try {
-      final result = await Process.run(
-        EnvironmentService.ffmpegPath,
-        fallbackArgs,
-        environment: EnvironmentService.processEnvironment,
-      );
-
-      final outputFile = File(outputPath);
-      if (result.exitCode == 0 && outputFile.existsSync() && outputFile.lengthSync() > 0) {
-        _snippetCache[videoPath] = outputPath;
-        debugPrint('[PreviewService] Fallback snippet re-encoded in ${stopwatch.elapsedMilliseconds}ms: $outputPath');
-        return outputPath;
-      }
-    } catch (e) {
-      debugPrint('[PreviewService] Fallback re-encode exception: $e');
+      debugPrint('[PreviewService] FFmpeg extraction exception: $e');
     }
 
     return videoPath;

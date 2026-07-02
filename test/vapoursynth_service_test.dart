@@ -14,8 +14,8 @@ void main() {
       final content = file.readAsStringSync();
 
       expect(content, contains('import vapoursynth as vs'));
-      expect(content, contains('KNLMeansCL(clip, d=4, a=2, s=4, h=8'));
-      expect(content, contains('core.std.Bilateral'));
+      expect(content, contains('KNLMeansCL(clip, d=4, a=2, s=4, h=8, channels="Y")'));
+      expect(content, contains('core.std.Convolution'));
       expect(content, contains('GPU Denoise Fallback'));
       expect(content, contains('denoised.set_output()'));
 
