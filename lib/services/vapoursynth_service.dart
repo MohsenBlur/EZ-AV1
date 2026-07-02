@@ -50,9 +50,6 @@ clip.set_output()
 ''';
       }
     } else {
-      // Gradual, professional denoise formula:
-      // h (filtering strength): 0.1 to 5.0 max to prevent smearing
-      // d (temporal radius): 1 for strength <= 4.0 (0 ghosting), 2 for > 4.0
       final double h = (denoiseStrength * 0.5).clamp(0.1, 5.0);
       final int d = denoiseStrength > 4.0 ? 2 : 1;
 
@@ -110,11 +107,14 @@ denoised.set_output()
     final ffmpegArgs = <String>[
       '-y',
       '-i', '-',
-      '-vf', 'scale=out_color_matrix=bt709:out_range=limited',
       '-c:v', 'libx264',
-      '-pix_fmt', 'yuv420p',
       '-preset', 'ultrafast',
       '-crf', '18',
+      '-pix_fmt', 'yuv420p',
+      '-color_range', '1',
+      '-colorspace', '1',
+      '-color_primaries', '1',
+      '-color_trc', '1',
       '-an',
       outputPath,
     ];

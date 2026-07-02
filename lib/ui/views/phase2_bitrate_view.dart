@@ -35,7 +35,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   int _selectedTargetIndex = 2; // Default to Pane 2
   
   bool _isPlaying = true;
-  bool _smartReveal = false;
+  bool _smartReveal = false; // False = Film Grain Synthesis Active, True = Grain Bypassed (Clean Video)
   bool _isProcessingPipeline = false;
   String? _currentVideoPath;
   String? _denoisedSnippetPath;
@@ -46,7 +46,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   @override
   void initState() {
     super.initState();
-    _paneVmafTargets = [95.0, 80.0, 88.0, 93.0]; // Pane 0 = Reference, Pane 1 = 80, Pane 2 = 88, Pane 3 = 93
+    _paneVmafTargets = [95.0, 80.0, 88.0, 93.0]; // Pane 0 = Reference Denoised, Pane 1 = 80, Pane 2 = 88, Pane 3 = 93
 
     for (int i = 0; i < 4; i++) {
       final player = Player();
@@ -77,6 +77,18 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     });
   }
 
+  int _vmafToCrf(double vmaf) {
+    if (vmaf >= 98.0) return 18;
+    if (vmaf >= 97.0) return 20;
+    if (vmaf >= 95.0) return 23;
+    if (vmaf >= 93.0) return 26;
+    if (vmaf >= 91.0) return 28;
+    if (vmaf >= 88.0) return 31;
+    if (vmaf >= 85.0) return 34;
+    if (vmaf >= 80.0) return 38;
+    return 42; // VMAF 75 or lower
+  }
+
   void _initMedia() async {
     final batchFiles = ref.read(workflowProvider).batchFiles;
     final validFiles = batchFiles.where((f) => File(f).existsSync()).toList();
@@ -89,7 +101,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     if (mounted) setState(() => _isProcessingPipeline = true);
     
     try {
-      // 1. Extract keyframe snippet
+      // 1. Extract keyframe snippet with BT.709 color calibration
       final snippetPath = await PreviewService.extractKeyframeSnippet(_currentVideoPath!);
       if (!File(snippetPath).existsSync()) return;
 
@@ -116,10 +128,10 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       await _players[0]?.open(Media(baseSnippet), play: _isPlaying);
 
       // 4. Encode real compressed comparison clips for Panes 1, 2, and 3
-      final crfValues = [22, 34, 28, 22]; // Corresponding quality levels
       for (int i = 1; i < 4; i++) {
-        final panePath = p.join(tempDir.path, 'ez_av1_pane_$i.mp4');
-        await _renderComparisonPane(baseSnippet, panePath, crfValues[i]);
+        final crf = _vmafToCrf(_paneVmafTargets[i]);
+        final panePath = p.join(tempDir.path, 'ez_av1_pane_${i}_${_paneVmafTargets[i].toInt()}.mp4');
+        await _renderComparisonPane(baseSnippet, panePath, crf);
         if (File(panePath).existsSync() && File(panePath).lengthSync() > 0) {
           await _players[i]?.open(Media(panePath), play: _isPlaying);
         } else {
@@ -134,14 +146,26 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   }
 
   Future<void> _renderComparisonPane(String inputPath, String outputPath, int crf) async {
+    final vfList = <String>[];
+    if (!_smartReveal) {
+      // Grain Synthesis simulation overlay matching SVT-AV1 photon-noise
+      vfList.add('noise=alls=12:allf=t+u');
+    }
+
+    final vfString = vfList.isNotEmpty ? vfList.join(',') : null;
+
     final ffmpegArgs = <String>[
       '-y',
       '-i', inputPath,
-      '-vf', 'scale=out_color_matrix=bt709:out_range=limited',
+      if (vfString != null) ...['-vf', vfString],
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-crf', '$crf',
       '-pix_fmt', 'yuv420p',
+      '-color_range', '1',
+      '-colorspace', '1',
+      '-color_primaries', '1',
+      '-color_trc', '1',
       '-an',
       outputPath,
     ];
@@ -157,6 +181,74 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       }
     } catch (e) {
       debugPrint('[Phase2] Pane render exception: $e');
+    }
+  }
+
+  void _onVmafTargetChanged(double newVmaf) async {
+    final index = _selectedTargetIndex;
+    if (index == 0) return; // Pane 0 is Reference Denoised Clip
+
+    setState(() {
+      _paneVmafTargets[index] = newVmaf;
+      _isProcessingPipeline = true;
+    });
+
+    try {
+      final crf = _vmafToCrf(newVmaf);
+      Directory tempDir;
+      try {
+        tempDir = await getTemporaryDirectory();
+      } catch (_) {
+        tempDir = Directory.systemTemp;
+      }
+
+      final panePath = p.join(tempDir.path, 'ez_av1_pane_${index}_${newVmaf.toInt()}.mp4');
+      final baseSnippet = (_denoisedSnippetPath != null && File(_denoisedSnippetPath!).existsSync())
+          ? _denoisedSnippetPath!
+          : _currentVideoPath!;
+
+      await _renderComparisonPane(baseSnippet, panePath, crf);
+
+      if (mounted && File(panePath).existsSync() && File(panePath).lengthSync() > 0) {
+        await _players[index]?.open(Media(panePath), play: _isPlaying);
+      }
+    } catch (e) {
+      debugPrint('[Phase2] Update pane $index error: $e');
+    } finally {
+      if (mounted) setState(() => _isProcessingPipeline = false);
+    }
+  }
+
+  void _toggleSmartReveal(bool value) async {
+    setState(() {
+      _smartReveal = value;
+      _isProcessingPipeline = true;
+    });
+
+    try {
+      final baseSnippet = (_denoisedSnippetPath != null && File(_denoisedSnippetPath!).existsSync())
+          ? _denoisedSnippetPath!
+          : _currentVideoPath!;
+
+      Directory tempDir;
+      try {
+        tempDir = await getTemporaryDirectory();
+      } catch (_) {
+        tempDir = Directory.systemTemp;
+      }
+
+      for (int i = 1; i < 4; i++) {
+        final crf = _vmafToCrf(_paneVmafTargets[i]);
+        final panePath = p.join(tempDir.path, 'ez_av1_pane_${i}_${_paneVmafTargets[i].toInt()}.mp4');
+        await _renderComparisonPane(baseSnippet, panePath, crf);
+        if (File(panePath).existsSync() && File(panePath).lengthSync() > 0) {
+          await _players[i]?.open(Media(panePath), play: _isPlaying);
+        }
+      }
+    } catch (e) {
+      debugPrint('[Phase2] Smart reveal toggle error: $e');
+    } finally {
+      if (mounted) setState(() => _isProcessingPipeline = false);
     }
   }
 
@@ -181,17 +273,6 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
         player.play();
       } else {
         player.pause();
-      }
-    }
-  }
-
-  void _toggleSmartReveal(bool value) {
-    setState(() {
-      _smartReveal = value;
-    });
-    for (var player in _players.values) {
-      if (player.platform is NativePlayer) {
-        (player.platform as NativePlayer).setProperty('vd-lavc-film-grain', value ? 'no' : 'auto');
       }
     }
   }
@@ -552,9 +633,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                             }).toList(),
                             onChanged: (val) {
                               if (val != null) {
-                                setState(() {
-                                  _paneVmafTargets[_selectedTargetIndex] = val;
-                                });
+                                _onVmafTargetChanged(val);
                               }
                             },
                           ),
