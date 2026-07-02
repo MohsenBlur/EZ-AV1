@@ -1,4 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'batch_queue_provider.dart';
+import '../models/batch_node_model.dart';
 
 enum SourceType {
   unselected,
@@ -41,7 +43,22 @@ class WorkflowState {
 class WorkflowNotifier extends Notifier<WorkflowState> {
   @override
   WorkflowState build() {
-    return const WorkflowState();
+    // Listen to changes in batchQueueProvider to automatically sync batchFiles
+    ref.listen<List<BatchNode>>(batchQueueProvider, (previous, next) {
+      _syncFilesFromQueue(next);
+    });
+
+    final currentQueue = ref.read(batchQueueProvider);
+    final fileNodes = BatchNode.extractFileNodes(currentQueue);
+    final filePaths = fileNodes.map((f) => f.absolutePath).toList();
+
+    return WorkflowState(batchFiles: filePaths);
+  }
+
+  void _syncFilesFromQueue(List<BatchNode> nodes) {
+    final fileNodes = BatchNode.extractFileNodes(nodes);
+    final filePaths = fileNodes.map((f) => f.absolutePath).toList();
+    state = state.copyWith(batchFiles: filePaths);
   }
 
   void setBatchFiles(List<String> files) {
