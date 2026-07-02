@@ -14,8 +14,8 @@ void main() {
     missing = ['Environment error: $e'];
   }
 
-  // Initialize media_kit for native video playback
-  MediaKit.ensureInitialized();
+  // Initialize media_kit for native video playback using our VapourSynth-enabled mpv-2.dll
+  MediaKit.ensureInitialized(libmpv: EnvironmentService.mpvLibraryPath);
 
   runApp(ProviderScope(child: EzAv1App(missingComponents: missing)));
 }

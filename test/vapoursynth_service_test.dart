@@ -14,10 +14,10 @@ void main() {
       final content = file.readAsStringSync();
 
       expect(content, contains('import vapoursynth as vs'));
-      expect(content, contains('KNLMeansCL(clip, a=1, h=3.50'));
+      expect(content, contains('KNLMeansCL(clip, d=4, a=2, s=4, h=8'));
       expect(content, contains('core.std.Bilateral'));
-      expect(content, contains('GPU Denoise Warning'));
-      expect(content, contains('clip.set_output()'));
+      expect(content, contains('GPU Denoise Fallback'));
+      expect(content, contains('denoised.set_output()'));
 
       // Clean up temp file
       if (file.existsSync()) file.deleteSync();

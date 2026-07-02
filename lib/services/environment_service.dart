@@ -19,6 +19,16 @@ class EnvironmentService {
   static String av1anPath = '';
   static String svtAv1Path = '';
 
+  /// Returns the absolute path to the VapourSynth-enabled mpv-2.dll library
+  static String get mpvLibraryPath {
+    final exeDir = p.dirname(Platform.resolvedExecutable);
+    final exeMpv = p.join(exeDir, 'mpv-2.dll');
+    if (File(exeMpv).existsSync() && File(exeMpv).lengthSync() > 100000000) {
+      return exeMpv;
+    }
+    return p.join(binDirectory, 'mpv-2.dll');
+  }
+
   /// Resolves portable binary paths and returns a list of missing required files.
   static List<String> getMissingBinaries() {
     String rootPath;

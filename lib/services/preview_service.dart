@@ -8,10 +8,11 @@ import 'environment_service.dart';
 class PreviewService {
   static final Map<String, String> _snippetCache = {};
 
-  /// Probes the container format duration in seconds (~5ms execution).
+  /// Multi-fallback container duration probing in seconds (~5ms execution).
   static Future<double> getVideoDuration(String videoPath) async {
     try {
-      final result = await Process.run(
+      // 1. Format duration
+      final result1 = await Process.run(
         EnvironmentService.ffprobePath,
         [
           '-v', 'error',
@@ -22,9 +23,53 @@ class PreviewService {
         environment: EnvironmentService.processEnvironment,
       );
 
-      if (result.exitCode == 0) {
-        final durationStr = (result.stdout as String).trim();
-        return double.tryParse(durationStr) ?? 0.0;
+      if (result1.exitCode == 0) {
+        final val = double.tryParse((result1.stdout as String).trim());
+        if (val != null && val > 0) return val;
+      }
+
+      // 2. Stream duration (video stream 0)
+      final result2 = await Process.run(
+        EnvironmentService.ffprobePath,
+        [
+          '-v', 'error',
+          '-select_streams', 'v:0',
+          '-show_entries', 'stream=duration',
+          '-of', 'default=noprint_wrappers=1:nokey=1',
+          videoPath,
+        ],
+        environment: EnvironmentService.processEnvironment,
+      );
+
+      if (result2.exitCode == 0) {
+        final val = double.tryParse((result2.stdout as String).trim());
+        if (val != null && val > 0) return val;
+      }
+
+      // 3. Container tag DURATION (HH:MM:SS.mmm format)
+      final result3 = await Process.run(
+        EnvironmentService.ffprobePath,
+        [
+          '-v', 'error',
+          '-show_entries', 'format_tags=DURATION:stream_tags=DURATION',
+          '-of', 'default=noprint_wrappers=1:nokey=1',
+          videoPath,
+        ],
+        environment: EnvironmentService.processEnvironment,
+      );
+
+      if (result3.exitCode == 0) {
+        final tagStr = (result3.stdout as String).trim();
+        for (final line in tagStr.split('\n')) {
+          final parts = line.trim().split(':');
+          if (parts.length == 3) {
+            final h = double.tryParse(parts[0]) ?? 0;
+            final m = double.tryParse(parts[1]) ?? 0;
+            final s = double.tryParse(parts[2]) ?? 0;
+            final total = h * 3600 + m * 60 + s;
+            if (total > 0) return total;
+          }
+        }
       }
     } catch (e) {
       debugPrint('[PreviewService] Duration probe exception: $e');

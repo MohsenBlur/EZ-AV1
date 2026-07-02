@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import '../../providers/execution_provider.dart';
 import '../../providers/navigation_provider.dart';
 import '../../services/vapoursynth_service.dart';
@@ -33,31 +36,23 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
   bool _isLoadingSnippet = false;
   String? _currentVideoPath;
   String? _snippetPath;
+  String? _denoisedPreviewPath;
   final List<StreamSubscription> _subscriptions = [];
 
   @override
   void initState() {
     super.initState();
-    // Initialize standard players
     _originalPlayer = Player();
     _originalController = VideoController(_originalPlayer);
     
     _filteredPlayer = Player();
     _filteredController = VideoController(_filteredPlayer);
-    
+
     _originalPlayer.setPlaylistMode(PlaylistMode.loop);
     _filteredPlayer.setPlaylistMode(PlaylistMode.loop);
     
     _originalPlayer.setVolume(0.0);
     _filteredPlayer.setVolume(0.0);
-    
-    // Debug Logging for VapourSynth filter diagnostics
-    _subscriptions.add(_filteredPlayer.stream.log.listen((event) {
-      if (!mounted) return;
-      if (event.text.toLowerCase().contains('vapoursynth') || event.text.toLowerCase().contains('vf')) {
-        debugPrint('MPV Filter Log: ${event.level} - ${event.text}');
-      }
-    }));
 
     // Frame synchronization guardrail: keeps filtered layer locked to original player
     _subscriptions.add(_originalPlayer.stream.position.listen((pos) {
@@ -69,7 +64,6 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
       }
     }));
     
-    // Load initial media after first frame when ref is available
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final savedDenoise = ref.read(workflowProvider).denoiseStrength;
       if (savedDenoise > 0) {
@@ -90,33 +84,52 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
       try {
         _snippetPath = await PreviewService.extractKeyframeSnippet(_currentVideoPath!);
       } catch (e) {
-        debugPrint('Snippet extraction error: $e');
+        debugPrint('[Phase1] Snippet extraction error: $e');
         _snippetPath = _currentVideoPath;
       } finally {
         if (mounted) setState(() => _isLoadingSnippet = false);
       }
       
       final mediaPath = _snippetPath ?? _currentVideoPath!;
-      
-      // Load the exact same snippet video in both players
-      await _originalPlayer.open(Media(mediaPath), play: true);
-      await _filteredPlayer.open(Media(mediaPath), play: true);
-      
-      // Initially set an empty script just to initialize the filter chain
+      await _updateDenoisedPreview(mediaPath);
+    }
+  }
+
+  Future<void> _updateDenoisedPreview(String snippetPath) async {
+    if (mounted) setState(() => _isCompilingScript = true);
+
+    try {
+      Directory tempDir;
       try {
-        if (_filteredPlayer.platform is NativePlayer) {
-          // Hardware decoding MUST be disabled or set to copy-back for software filters to work!
-          await (_filteredPlayer.platform as NativePlayer).setProperty('hwdec', 'no');
-        }
-        
-        final scriptPath = await VapourSynthService.generateDenoiseScript(_denoiseStrength);
-        if (_filteredPlayer.platform is NativePlayer) {
-          final escapedPath = scriptPath.replaceAll('\\', '/');
-          await (_filteredPlayer.platform as NativePlayer).setProperty('vf', 'vapoursynth="$escapedPath"');
-        }
-      } catch (e) {
-        debugPrint('Script error: $e');
+        tempDir = await getTemporaryDirectory();
+      } catch (_) {
+        tempDir = Directory.systemTemp;
       }
+
+      _denoisedPreviewPath = p.join(tempDir.path, 'ez_av1_denoised_preview.mp4');
+
+      final scriptPath = await VapourSynthService.generateDenoiseScript(
+        _denoiseStrength,
+        sourceFilePath: snippetPath,
+      );
+
+      final renderedPath = await VapourSynthService.renderDenoisedPreview(
+        scriptPath,
+        _denoisedPreviewPath!,
+      );
+
+      // Open snippet in original player and rendered denoised video in filtered player
+      await _originalPlayer.open(Media(snippetPath), play: true);
+      
+      if (File(renderedPath).existsSync() && File(renderedPath).lengthSync() > 0) {
+        await _filteredPlayer.open(Media(renderedPath), play: true);
+      } else {
+        await _filteredPlayer.open(Media(snippetPath), play: true);
+      }
+    } catch (e) {
+      debugPrint('[Phase1] Denoise preview render exception: $e');
+    } finally {
+      if (mounted) setState(() => _isCompilingScript = false);
     }
   }
 
@@ -137,38 +150,23 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
       _denoiseStrength = value;
     });
     
-    // Debounce the script generation and player reload
+    // Debounce preview rendering
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), () async {
-      setState(() => _isCompilingScript = true);
-      
-      if (_currentVideoPath == null) return;
-      try {
-        final scriptPath = await VapourSynthService.generateDenoiseScript(_denoiseStrength);
-        
-        // Dynamically apply the new VapourSynth filter script!
-        if (_filteredPlayer.platform is NativePlayer) {
-          final escapedPath = scriptPath.replaceAll('\\', '/');
-          await (_filteredPlayer.platform as NativePlayer).setProperty('vf', 'vapoursynth="$escapedPath"');
-        }
-      } catch (e) {
-        debugPrint('Script error: $e');
-      } finally {
-        if (mounted) setState(() => _isCompilingScript = false);
+    _debounce = Timer(const Duration(milliseconds: 300), () async {
+      if (_snippetPath != null || _currentVideoPath != null) {
+        await _updateDenoisedPreview(_snippetPath ?? _currentVideoPath!);
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Listen for batch queue changes to auto-update video player if selection changes
     ref.listenManual(workflowProvider.select((w) => w.batchFiles), (previous, next) {
       if (next.isNotEmpty && next.first != _currentVideoPath) {
         _initMedia();
       }
     });
 
-    // Watch execution state for resource suspension
     final isRendering = ref.watch(executionProvider.select((s) => s.isRunning));
 
     if (isRendering) {
@@ -330,7 +328,7 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
                                       Text(
                                         _isLoadingSnippet
                                             ? 'Extracting Lossless Keyframe Snippet...'
-                                            : 'Updating VapourSynth Script...',
+                                            : 'Rendering VapourSynth Denoise Preview (~0.1s)...',
                                         style: const TextStyle(color: Colors.white70, fontSize: 13),
                                       ),
                                     ],
@@ -407,7 +405,6 @@ class _WipeClipper extends CustomClipper<Rect> {
 
   @override
   Rect getClip(Size size) {
-    // Reveal from the right side
     return Rect.fromLTWH(size.width * splitPosition, 0, size.width * (1 - splitPosition), size.height);
   }
 
