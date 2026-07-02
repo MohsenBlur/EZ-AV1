@@ -14,7 +14,6 @@ import '../../providers/batch_queue_provider.dart';
 import '../../models/preset_model.dart';
 import '../../services/preview_service.dart';
 import '../../services/vapoursynth_service.dart';
-import '../../services/av1an_service.dart';
 import '../../services/environment_service.dart';
 import '../widgets/ez_panel.dart';
 
@@ -60,14 +59,15 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       player.setVolume(0.0);
     }
 
+    // Tighter 50ms lockstep frame synchronization across all 4 quadrants
     if (_players[0] != null) {
       _subscriptions.add(_players[0]!.stream.position.listen((pos) {
         if (!mounted || !_isPlaying) return;
         for (int i = 1; i < 4; i++) {
           final player = _players[i];
-          if (player != null) {
+          if (player != null && player.state.playing) {
             final diff = (pos - player.state.position).inMilliseconds.abs();
-            if (diff > 250) {
+            if (diff > 50) {
               player.seek(pos);
             }
           }
@@ -135,25 +135,39 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
 
       final baseSnippet = File(_denoisedSnippetPath!).existsSync() ? _denoisedSnippetPath! : snippetPath;
 
-      // 3. Open Pane 0 as Reference Denoised Clip
-      await _players[0]?.open(Media(baseSnippet), play: _isPlaying);
+      // 3. Open Pane 0 as Reference Denoised Clip (paused initially for sync)
+      await _players[0]?.open(Media(baseSnippet), play: false);
 
       // 4. Encode real SVT-AV1 comparison clips for Panes 1, 2, and 3
       for (int i = 1; i < 4; i++) {
         final panePath = await _getOrRenderPane(i, _paneVmafTargets[i], _smartReveal, baseSnippet);
         if (File(panePath).existsSync() && File(panePath).lengthSync() > 0) {
-          await _players[i]?.open(Media(panePath), play: _isPlaying);
+          await _players[i]?.open(Media(panePath), play: false);
         } else {
-          await _players[i]?.open(Media(baseSnippet), play: _isPlaying);
+          await _players[i]?.open(Media(baseSnippet), play: false);
         }
         
         // Background pre-render opposite grain state for INSTANT toggle (<10ms)
         _getOrRenderPane(i, _paneVmafTargets[i], !_smartReveal, baseSnippet);
       }
+
+      // Synchronous lockstep start across all 4 players
+      await _synchronousPlayAll();
     } catch (e) {
       debugPrint('[Phase2] Pipeline processing error: $e');
     } finally {
       if (mounted) setState(() => _isProcessingPipeline = false);
+    }
+  }
+
+  Future<void> _synchronousPlayAll() async {
+    for (int i = 0; i < 4; i++) {
+      await _players[i]?.seek(Duration.zero);
+    }
+    if (_isPlaying) {
+      for (int i = 0; i < 4; i++) {
+        _players[i]?.play();
+      }
     }
   }
 
@@ -184,6 +198,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   }
 
   /// Encodes the denoised snippet clip through native SVT-AV1 with explicit color metadata & photon noise (~0.4s).
+  /// Safe process stream piping prevents OS pipe closure exceptions (errno 232).
   Future<void> _renderSvtAv1Pane(String inputPath, String outputPath, int crf, {required bool bypassGrain}) async {
     Directory tempDir;
     try {
@@ -195,11 +210,10 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     final ivfPath = p.join(tempDir.path, 'ez_av1_pane_${crf}_${bypassGrain ? "nograin" : "grain"}.ivf');
     final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
     
-    // Predictive Inversion: calculate active photon noise for SVT-AV1 grain synthesis
+    // Clearly visible organic photon noise intensity for SVT-AV1 film grain synthesis
     int photonNoise = 0;
     if (!bypassGrain) {
-      photonNoise = Av1anService.calculatePhotonNoise(denoiseStrength > 0 ? denoiseStrength : 4.0);
-      if (photonNoise <= 0) photonNoise = 16; // Ensure visible organic grain synthesis when active
+      photonNoise = (denoiseStrength * 4.0).clamp(15.0, 40.0).round();
     }
 
     final svtArgs = <String>[
@@ -234,7 +248,22 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       p1.stderr.listen((_) {});
       p2.stderr.listen((_) {});
 
-      await p1.stdout.pipe(p2.stdin);
+      // Safe stream piping with try-catch handles closed OS pipes cleanly without socket exceptions
+      p1.stdout.listen(
+        (data) {
+          try {
+            p2.stdin.add(data);
+          } catch (_) {}
+        },
+        onDone: () async {
+          try {
+            await p2.stdin.close();
+          } catch (_) {}
+        },
+        onError: (_) {},
+        cancelOnError: true,
+      );
+
       final exitCode = await p2.exitCode;
 
       if (exitCode == 0 && File(ivfPath).existsSync() && File(ivfPath).lengthSync() > 0) {
@@ -278,7 +307,9 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       final panePath = await _getOrRenderPane(index, newVmaf, _smartReveal, baseSnippet);
 
       if (mounted && File(panePath).existsSync() && File(panePath).lengthSync() > 0) {
+        final pos = _players[0]?.state.position ?? Duration.zero;
         await _players[index]?.open(Media(panePath), play: _isPlaying);
+        await _players[index]?.seek(pos);
       }
 
       // Background pre-render opposite grain state for INSTANT toggle
@@ -313,10 +344,12 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     }
 
     try {
+      final currentPos = _players[0]?.state.position ?? Duration.zero;
       for (int i = 1; i < 4; i++) {
         final panePath = await _getOrRenderPane(i, _paneVmafTargets[i], value, baseSnippet);
         if (File(panePath).existsSync() && File(panePath).lengthSync() > 0) {
           await _players[i]?.open(Media(panePath), play: _isPlaying);
+          await _players[i]?.seek(currentPos);
         }
       }
     } catch (e) {
