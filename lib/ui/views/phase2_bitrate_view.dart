@@ -27,6 +27,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   final Map<int, VideoController> _controllers = {};
   final List<StreamSubscription> _subscriptions = [];
   final Map<String, String> _paneCache = {};
+  final Set<Process> _activeProcesses = {};
   
   final List<double> _availableVmafTargets = [75.0, 80.0, 85.0, 88.0, 91.0, 93.0, 95.0, 97.0, 98.0];
   late List<double> _paneVmafTargets;
@@ -95,7 +96,21 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     return 50;
   }
 
+  void _killActiveProcesses() {
+    for (final proc in _activeProcesses) {
+      try {
+        if (Platform.isWindows) {
+          Process.run('taskkill', ['/F', '/T', '/PID', proc.pid.toString()]);
+        } else {
+          proc.kill();
+        }
+      } catch (_) {}
+    }
+    _activeProcesses.clear();
+  }
+
   void _initMedia() async {
+    _killActiveProcesses();
     final batchFiles = ref.read(workflowProvider).batchFiles;
     final validFiles = batchFiles.where((f) => File(f).existsSync()).toList();
     if (validFiles.isEmpty) {
@@ -191,7 +206,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     return outputPath;
   }
 
-  /// Encodes clean SVT-AV1 clip (0 noise synthesis) with explicit color metadata (~0.4s).
+  /// Encodes clean SVT-AV1 clip (0 noise synthesis) with process tracking and automatic process tree termination.
   Future<void> _renderSvtAv1Pane(String inputPath, String outputPath, int crf) async {
     Directory tempDir;
     try {
@@ -212,8 +227,11 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       '-b', ivfPath,
     ];
 
+    Process? p1;
+    Process? p2;
+
     try {
-      final p1 = await Process.start(
+      p1 = await Process.start(
         EnvironmentService.ffmpegPath,
         [
           '-y',
@@ -225,11 +243,14 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
         environment: EnvironmentService.processEnvironment,
       );
 
-      final p2 = await Process.start(
+      p2 = await Process.start(
         EnvironmentService.svtAv1Path,
         svtArgs,
         environment: EnvironmentService.processEnvironment,
       );
+
+      _activeProcesses.add(p1);
+      _activeProcesses.add(p2);
 
       p1.stderr.listen((_) {});
       p2.stderr.listen((_) {});
@@ -237,12 +258,12 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       p1.stdout.listen(
         (data) {
           try {
-            p2.stdin.add(data);
+            p2?.stdin.add(data);
           } catch (_) {}
         },
         onDone: () async {
           try {
-            await p2.stdin.close();
+            await p2?.stdin.close();
           } catch (_) {}
         },
         onError: (_) {},
@@ -269,6 +290,9 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       }
     } catch (e) {
       debugPrint('[Phase2] SVT-AV1 encode exception: $e');
+    } finally {
+      if (p1 != null) _activeProcesses.remove(p1);
+      if (p2 != null) _activeProcesses.remove(p2);
     }
   }
 
@@ -302,6 +326,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
 
   @override
   void dispose() {
+    _killActiveProcesses();
     for (final sub in _subscriptions) {
       sub.cancel();
     }
@@ -438,6 +463,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                 const Spacer(),
                 ElevatedButton.icon(
                   onPressed: () {
+                    _killActiveProcesses();
                     final selectedTarget = _paneVmafTargets[_selectedTargetIndex];
                     ref.read(workflowProvider.notifier).completePhase2(selectedTarget);
                     ref.read(selectedTabProvider.notifier).setTab(4); // Advance to Phase 3: Grain Lock

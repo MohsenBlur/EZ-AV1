@@ -33,6 +33,7 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
   late final VideoController _grainController;
   
   final List<StreamSubscription> _subscriptions = [];
+  final Set<Process> _activeProcesses = {};
   Timer? _debounceTimer;
 
   bool _isPlaying = true;
@@ -88,7 +89,21 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
     return 50;
   }
 
+  void _killActiveProcesses() {
+    for (final proc in _activeProcesses) {
+      try {
+        if (Platform.isWindows) {
+          Process.run('taskkill', ['/F', '/T', '/PID', proc.pid.toString()]);
+        } else {
+          proc.kill();
+        }
+      } catch (_) {}
+    }
+    _activeProcesses.clear();
+  }
+
   void _initMedia() async {
+    _killActiveProcesses();
     final batchFiles = ref.read(workflowProvider).batchFiles;
     final validFiles = batchFiles.where((f) => File(f).existsSync()).toList();
     if (validFiles.isEmpty) {
@@ -182,8 +197,11 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
       '-b', ivfPath,
     ];
 
+    Process? p1;
+    Process? p2;
+
     try {
-      final p1 = await Process.start(
+      p1 = await Process.start(
         EnvironmentService.ffmpegPath,
         [
           '-y',
@@ -195,11 +213,14 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
         environment: EnvironmentService.processEnvironment,
       );
 
-      final p2 = await Process.start(
+      p2 = await Process.start(
         EnvironmentService.svtAv1Path,
         svtArgs,
         environment: EnvironmentService.processEnvironment,
       );
+
+      _activeProcesses.add(p1);
+      _activeProcesses.add(p2);
 
       p1.stderr.listen((_) {});
       p2.stderr.listen((_) {});
@@ -207,12 +228,12 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
       p1.stdout.listen(
         (data) {
           try {
-            p2.stdin.add(data);
+            p2?.stdin.add(data);
           } catch (_) {}
         },
         onDone: () async {
           try {
-            await p2.stdin.close();
+            await p2?.stdin.close();
           } catch (_) {}
         },
         onError: (_) {},
@@ -239,6 +260,9 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
       }
     } catch (e) {
       debugPrint('[Phase3] SVT-AV1 encode exception: $e');
+    } finally {
+      if (p1 != null) _activeProcesses.remove(p1);
+      if (p2 != null) _activeProcesses.remove(p2);
     }
   }
 
@@ -249,6 +273,8 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
     });
 
     _debounceTimer?.cancel();
+    _killActiveProcesses();
+
     _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
       if (!mounted) return;
       setState(() => _isProcessingPipeline = true);
@@ -352,6 +378,7 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    _killActiveProcesses();
     for (final sub in _subscriptions) {
       sub.cancel();
     }
@@ -496,6 +523,7 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
                 const SizedBox(width: 12),
                 ElevatedButton.icon(
                   onPressed: () {
+                    _killActiveProcesses();
                     final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
                     final targetVmaf = ref.read(workflowProvider).targetVmaf;
                     final preset = PresetModel(
