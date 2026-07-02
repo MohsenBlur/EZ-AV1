@@ -83,7 +83,17 @@ class AppShell extends ConsumerWidget {
                 Expanded(
                   child: Container(
                     color: Theme.of(context).scaffoldBackgroundColor,
-                    child: _buildContent(selectedIndex),
+                    child: IndexedStack(
+                      index: selectedIndex,
+                      children: const [
+                        FileImportView(),
+                        Phase0BypassView(),
+                        Phase1TextureView(),
+                        Phase2BitrateView(),
+                        Phase3ExecutionView(),
+                        Center(child: Text('Settings View')),
+                      ],
+                    ),
                   ),
                 ),
                 
@@ -114,25 +124,6 @@ class AppShell extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  Widget _buildContent(int index) {
-    switch (index) {
-      case 0:
-        return const FileImportView();
-      case 1:
-        return const Phase0BypassView();
-      case 2:
-        return const Phase1TextureView();
-      case 3:
-        return const Phase2BitrateView();
-      case 4:
-        return const Phase3ExecutionView();
-      case 5:
-        return const Center(child: Text('Settings View'));
-      default:
-        return const SizedBox.shrink();
-    }
   }
 }
 
