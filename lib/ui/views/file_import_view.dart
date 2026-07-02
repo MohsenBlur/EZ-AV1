@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../../providers/workflow_provider.dart';
 import '../../providers/navigation_provider.dart';
 import '../../providers/batch_queue_provider.dart';
+import '../../models/batch_node_model.dart';
 
 const validExtensions = ['.mkv', '.mp4', '.mov', '.avi', '.m2ts', '.webm', '.flv'];
 
@@ -24,46 +25,58 @@ class _FileImportViewState extends ConsumerState<FileImportView> {
   Future<void> _processPaths(List<String> paths) async {
     setState(() => _isProcessing = true);
     
-    // Process in background to avoid freezing UI for huge folders
-    final validFiles = await Future.microtask(() {
-      final List<String> result = [];
+    final batchQueueNotifier = ref.read(batchQueueProvider.notifier);
+    final filePathsToAdd = <String>[];
+
+    try {
       for (final path in paths) {
-        if (FileSystemEntity.isDirectorySync(path)) {
-          final dir = Directory(path);
-          for (final entity in dir.listSync(recursive: true, followLinks: false)) {
-            if (entity is File) {
-              final ext = p.extension(entity.path).toLowerCase();
-              if (validExtensions.contains(ext)) {
-                result.add(entity.path);
-              }
-            }
-          }
-        } else if (FileSystemEntity.isFileSync(path)) {
+        if (await FileSystemEntity.isDirectory(path)) {
+          await batchQueueNotifier.importDirectory(path);
+        } else if (await FileSystemEntity.isFile(path)) {
           final ext = p.extension(path).toLowerCase();
           if (validExtensions.contains(ext)) {
-            result.add(path);
+            filePathsToAdd.add(path);
           }
         }
       }
-      return result;
-    });
 
-    setState(() => _isProcessing = false);
+      if (filePathsToAdd.isNotEmpty) {
+        await batchQueueNotifier.addFiles(filePathsToAdd);
+      }
 
-    if (validFiles.isNotEmpty) {
-      ref.read(workflowProvider.notifier).addBatchFiles(validFiles);
-      await ref.read(batchQueueProvider.notifier).addFiles(validFiles);
-      
-      // Auto-advance to Source Type phase
-      ref.read(selectedTabProvider.notifier).setTab(1);
-    } else {
+      // Sync all valid file paths into workflowProvider
+      final allQueueNodes = ref.read(batchQueueProvider);
+      final allFiles = BatchNode.extractFileNodes(allQueueNodes);
+
+      if (allFiles.isNotEmpty) {
+        ref.read(workflowProvider.notifier).setBatchFiles(allFiles.map((f) => f.absolutePath).toList());
+        
+        // Auto-advance to Source Type phase
+        if (mounted) {
+          ref.read(selectedTabProvider.notifier).setTab(1);
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No supported video files found.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No supported video files found.'),
+          SnackBar(
+            content: Text('Error processing files: $e'),
             backgroundColor: Colors.redAccent,
           ),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
       }
     }
   }

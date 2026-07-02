@@ -13,22 +13,35 @@ final batchQueueProvider = NotifierProvider<BatchQueueNotifier, List<BatchNode>>
 
 class BatchQueueNotifier extends Notifier<List<BatchNode>> {
   final _uuid = const Uuid();
+  Future<void>? _initialLoadFuture;
 
   @override
   List<BatchNode> build() {
-    // Initial load happens asynchronously.
-    _loadState();
+    _initialLoadFuture = _loadState();
     return [];
+  }
+
+  Future<void> ensureInitialized() async {
+    if (_initialLoadFuture != null) {
+      await _initialLoadFuture;
+    }
   }
 
   Future<void> _loadState() async {
     try {
       final directory = await getApplicationSupportDirectory();
-      final file = File('${directory.path}\\state.json');
+      if (!ref.mounted) return;
+      final file = File(p.join(directory.path, 'state.json'));
       if (file.existsSync()) {
         final content = await file.readAsString();
+        if (!ref.mounted) return;
         final List<dynamic> jsonList = jsonDecode(content);
-        state = jsonList.map((e) => BatchNode.fromJson(e as Map<String, dynamic>)).toList();
+        final diskNodes = jsonList.map((e) => BatchNode.fromJson(e as Map<String, dynamic>)).toList();
+
+        // Merge disk nodes with any nodes that were added before _loadState finished
+        final existingIds = {for (var n in state) n.id};
+        final newDiskNodes = diskNodes.where((n) => !existingIds.contains(n.id)).toList();
+        state = [...newDiskNodes, ...state];
         _recalculateState();
       }
     } catch (e) {
@@ -37,12 +50,14 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
   }
 
   Future<void> _saveState() async {
+    if (!ref.mounted) return;
     try {
       final directory = await getApplicationSupportDirectory();
+      if (!ref.mounted) return;
       if (!directory.existsSync()) {
         directory.createSync(recursive: true);
       }
-      final file = File('${directory.path}\\state.json');
+      final file = File(p.join(directory.path, 'state.json'));
       await file.writeAsString(jsonEncode(state.map((e) => e.toJson()).toList()));
     } catch (e) {
       // Ignore save errors
@@ -51,6 +66,7 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
 
   /// Recursively parses a directory from disk and loads it into the queue.
   Future<void> importDirectory(String path) async {
+    await ensureInitialized();
     final dir = Directory(path);
     if (!await dir.exists()) return;
 
@@ -62,6 +78,7 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
 
   /// Adds a list of flat file paths to the queue
   Future<void> addFiles(List<String> filePaths) async {
+    await ensureInitialized();
     final newNodes = <BatchNode>[];
     for (final path in filePaths) {
       final file = File(path);
@@ -131,7 +148,8 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
   }
 
   /// Assigns a preset to a specific node (directory or file)
-  void assignPreset(String nodeId, PresetModel preset) {
+  Future<void> assignPreset(String nodeId, PresetModel preset) async {
+    await ensureInitialized();
     final node = _findNode(state, nodeId);
     if (node != null) {
       node.assignedPreset = preset;
@@ -141,7 +159,8 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
   }
 
   /// Removes a node by ID
-  void removeNode(String nodeId) {
+  Future<void> removeNode(String nodeId) async {
+    await ensureInitialized();
     bool removed = _removeNodeRecursive(state, nodeId);
     if (removed) {
       _recalculateState();

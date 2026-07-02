@@ -28,6 +28,22 @@ abstract class BatchNode {
       return FileNode.fromJson(json);
     }
   }
+
+  /// Recursively flattens a list of nodes to return all leaf FileNodes.
+  static List<FileNode> extractFileNodes(List<BatchNode> nodes) {
+    final result = <FileNode>[];
+    void walk(List<BatchNode> list) {
+      for (final node in list) {
+        if (node is FileNode) {
+          result.add(node);
+        } else if (node is DirectoryNode) {
+          walk(node.children);
+        }
+      }
+    }
+    walk(nodes);
+    return result;
+  }
 }
 
 class FileNode extends BatchNode {

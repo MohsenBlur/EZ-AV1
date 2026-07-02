@@ -7,7 +7,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('BatchQueueNotifier', () {
-    test('removeNode safely removes child node from DirectoryNode without UnsupportedError', () {
+    test('removeNode safely removes child node from DirectoryNode without UnsupportedError', () async {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
@@ -32,7 +32,7 @@ void main() {
       notifier.state = [parentDir];
 
       // Attempt to remove child node
-      expect(() => notifier.removeNode('child_1'), returnsNormally);
+      await notifier.removeNode('child_1');
 
       final updatedState = container.read(batchQueueProvider);
       final updatedParent = updatedState.first as DirectoryNode;
@@ -55,6 +55,27 @@ void main() {
       )), returnsNormally);
 
       expect(emptyDir.children.length, equals(1));
+    });
+
+    test('ensureInitialized awaits initial load before modifying state', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      final notifier = container.read(batchQueueProvider.notifier);
+      await notifier.ensureInitialized();
+
+      expect(notifier.state, isA<List<BatchNode>>());
+    });
+
+    test('BatchNode.extractFileNodes flattens nested DirectoryNode trees correctly', () {
+      final file1 = FileNode(id: '1', name: 'a.mp4', absolutePath: '/a.mp4', extension: '.mp4', sizeBytes: 10);
+      final file2 = FileNode(id: '2', name: 'b.mkv', absolutePath: '/sub/b.mkv', extension: '.mkv', sizeBytes: 20);
+      final subDir = DirectoryNode(id: 'd2', name: 'sub', absolutePath: '/sub', children: [file2]);
+      final rootDir = DirectoryNode(id: 'd1', name: 'root', absolutePath: '/', children: [file1, subDir]);
+
+      final files = BatchNode.extractFileNodes([rootDir]);
+      expect(files.length, equals(2));
+      expect(files.map((f) => f.absolutePath), containsAll(['/a.mp4', '/sub/b.mkv']));
     });
   });
 }

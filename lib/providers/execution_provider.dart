@@ -70,17 +70,7 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
   }
 
   void _syncJobsFromQueue(List<BatchNode> nodes) {
-    final List<FileNode> files = [];
-    void extractFiles(List<BatchNode> list) {
-      for (var node in list) {
-        if (node is FileNode) {
-          files.add(node);
-        } else if (node is DirectoryNode) {
-          extractFiles(node.children);
-        }
-      }
-    }
-    extractFiles(nodes);
+    final files = BatchNode.extractFileNodes(nodes);
 
     // Smart Merge: Retain existing state for known IDs
     final existingJobs = {for (var j in state.jobs) j.id: j};
