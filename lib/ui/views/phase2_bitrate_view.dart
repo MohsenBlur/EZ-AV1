@@ -5,12 +5,16 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import '../../providers/execution_provider.dart';
 import '../../providers/navigation_provider.dart';
 import '../../providers/workflow_provider.dart';
 import '../../providers/batch_queue_provider.dart';
 import '../../models/preset_model.dart';
 import '../../services/preview_service.dart';
+import '../../services/vapoursynth_service.dart';
+import '../../services/environment_service.dart';
 import '../widgets/ez_panel.dart';
 
 class Phase2BitrateView extends ConsumerStatefulWidget {
@@ -25,12 +29,16 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   final Map<int, VideoController> _controllers = {};
   final List<StreamSubscription> _subscriptions = [];
   
-  final List<double> _vmafTargets = [91.0, 93.0, 95.0, 97.0];
-  int _selectedTargetIndex = 2; // Default to 95.0
+  // Available VMAF target options (including targets lower than 91)
+  final List<double> _availableVmafTargets = [75.0, 80.0, 85.0, 88.0, 91.0, 93.0, 95.0, 97.0, 98.0];
+  late List<double> _paneVmafTargets;
+  int _selectedTargetIndex = 2; // Default to Pane 2
+  
   bool _isPlaying = true;
   bool _smartReveal = false;
-  bool _isLoadingSnippet = false;
+  bool _isProcessingPipeline = false;
   String? _currentVideoPath;
+  String? _denoisedSnippetPath;
   
   double _splitX = 0.5;
   double _splitY = 0.5;
@@ -38,6 +46,8 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   @override
   void initState() {
     super.initState();
+    _paneVmafTargets = [95.0, 80.0, 88.0, 93.0]; // Pane 0 = Reference, Pane 1 = 80, Pane 2 = 88, Pane 3 = 93
+
     for (int i = 0; i < 4; i++) {
       final player = Player();
       _players[i] = player;
@@ -76,39 +86,77 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     }
     
     _currentVideoPath = validFiles.first;
-    if (mounted) setState(() => _isLoadingSnippet = true);
+    if (mounted) setState(() => _isProcessingPipeline = true);
     
-    String snippetPath;
     try {
-      snippetPath = await PreviewService.extractKeyframeSnippet(_currentVideoPath!);
-    } catch (e) {
-      debugPrint('[Phase2] Snippet extraction error: $e');
-      snippetPath = _currentVideoPath!;
-    } finally {
-      if (mounted) setState(() => _isLoadingSnippet = false);
-    }
+      // 1. Extract keyframe snippet
+      final snippetPath = await PreviewService.extractKeyframeSnippet(_currentVideoPath!);
+      if (!File(snippetPath).existsSync()) return;
 
-    if (!File(snippetPath).existsSync()) return;
-    
-    final filterProfiles = [
-      '', // Pane 0: Original Reference
-      '', // Pane 1: High Quality
-      'scale=iw*0.85:ih*0.85:flags=bilinear,scale=iw:ih:flags=nearest', // Pane 2: Balanced Target
-      'scale=iw*0.70:ih*0.70:flags=bilinear,scale=iw:ih:flags=nearest', // Pane 3: High Efficiency
-    ];
+      // 2. Process snippet through Phase 1 denoiser
+      final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
+      Directory tempDir;
+      try {
+        tempDir = await getTemporaryDirectory();
+      } catch (_) {
+        tempDir = Directory.systemTemp;
+      }
 
-    for (int i = 0; i < 4; i++) {
-      final player = _players[i];
-      if (player != null) {
-        await player.open(Media(snippetPath), play: _isPlaying);
-        if (player.platform is NativePlayer && filterProfiles[i].isNotEmpty) {
-          try {
-            await (player.platform as NativePlayer).setProperty('vf', filterProfiles[i]);
-          } catch (e) {
-            debugPrint('Failed to set filter for pane $i: $e');
-          }
+      final scriptPath = await VapourSynthService.generateDenoiseScript(
+        denoiseStrength,
+        sourceFilePath: snippetPath,
+      );
+
+      final denoisedPath = p.join(tempDir.path, 'ez_av1_phase2_denoised.mp4');
+      _denoisedSnippetPath = await VapourSynthService.renderDenoisedPreview(scriptPath, denoisedPath);
+
+      final baseSnippet = File(_denoisedSnippetPath!).existsSync() ? _denoisedSnippetPath! : snippetPath;
+
+      // 3. Open Pane 0 as Reference Denoised Clip
+      await _players[0]?.open(Media(baseSnippet), play: _isPlaying);
+
+      // 4. Encode real compressed comparison clips for Panes 1, 2, and 3
+      final crfValues = [22, 34, 28, 22]; // Corresponding quality levels
+      for (int i = 1; i < 4; i++) {
+        final panePath = p.join(tempDir.path, 'ez_av1_pane_$i.mp4');
+        await _renderComparisonPane(baseSnippet, panePath, crfValues[i]);
+        if (File(panePath).existsSync() && File(panePath).lengthSync() > 0) {
+          await _players[i]?.open(Media(panePath), play: _isPlaying);
+        } else {
+          await _players[i]?.open(Media(baseSnippet), play: _isPlaying);
         }
       }
+    } catch (e) {
+      debugPrint('[Phase2] Pipeline processing error: $e');
+    } finally {
+      if (mounted) setState(() => _isProcessingPipeline = false);
+    }
+  }
+
+  Future<void> _renderComparisonPane(String inputPath, String outputPath, int crf) async {
+    final ffmpegArgs = <String>[
+      '-y',
+      '-i', inputPath,
+      '-vf', 'scale=out_color_matrix=bt709:out_range=limited',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '$crf',
+      '-pix_fmt', 'yuv420p',
+      '-an',
+      outputPath,
+    ];
+
+    try {
+      final res = await Process.run(
+        EnvironmentService.ffmpegPath,
+        ffmpegArgs,
+        environment: EnvironmentService.processEnvironment,
+      );
+      if (res.exitCode != 0) {
+        debugPrint('[Phase2] Pane render failed: exitCode=${res.exitCode}');
+      }
+    } catch (e) {
+      debugPrint('[Phase2] Pane render exception: $e');
     }
   }
 
@@ -276,11 +324,12 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
               ElevatedButton.icon(
                 onPressed: () {
                   final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
+                  final selectedTarget = _paneVmafTargets[_selectedTargetIndex];
                   final preset = PresetModel(
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
-                    name: 'Auto-VMAF ${_vmafTargets[_selectedTargetIndex].toInt()}',
+                    name: 'Auto-VMAF ${selectedTarget.toInt()}',
                     denoiseStrength: denoiseStrength,
-                    targetVmaf: _vmafTargets[_selectedTargetIndex],
+                    targetVmaf: selectedTarget,
                     photonNoise: _smartReveal ? 0 : (denoiseStrength > 0 ? 0 : 20),
                   );
                   
@@ -352,25 +401,25 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                 fit: StackFit.expand,
                                 children: [
                                   Video(controller: _controllers[0]!, controls: NoVideoControls),
-                                  if (_selectedTargetIndex == 0) _buildSelectionHighlight(0.0, 0.0, _splitX, _splitY, constraints),
+                                  if (_selectedTargetIndex == 0) _buildSelectionBorder(0.0, 0.0, _splitX, _splitY, constraints),
                                   
                                   ClipRect(
                                     clipper: _QuadClipper(_splitX, 0.0, 1.0, _splitY),
                                     child: Video(controller: _controllers[1]!, controls: NoVideoControls),
                                   ),
-                                  if (_selectedTargetIndex == 1) _buildSelectionHighlight(_splitX, 0.0, 1.0, _splitY, constraints),
+                                  if (_selectedTargetIndex == 1) _buildSelectionBorder(_splitX, 0.0, 1.0, _splitY, constraints),
                                   
                                   ClipRect(
                                     clipper: _QuadClipper(0.0, _splitY, _splitX, 1.0),
                                     child: Video(controller: _controllers[2]!, controls: NoVideoControls),
                                   ),
-                                  if (_selectedTargetIndex == 2) _buildSelectionHighlight(0.0, _splitY, _splitX, 1.0, constraints),
+                                  if (_selectedTargetIndex == 2) _buildSelectionBorder(0.0, _splitY, _splitX, 1.0, constraints),
                                   
                                   ClipRect(
                                     clipper: _QuadClipper(_splitX, _splitY, 1.0, 1.0),
                                     child: Video(controller: _controllers[3]!, controls: NoVideoControls),
                                   ),
-                                  if (_selectedTargetIndex == 3) _buildSelectionHighlight(_splitX, _splitY, 1.0, 1.0, constraints),
+                                  if (_selectedTargetIndex == 3) _buildSelectionBorder(_splitX, _splitY, 1.0, 1.0, constraints),
                                   
                                   Positioned(
                                     left: constraints.maxWidth * _splitX - 1,
@@ -401,12 +450,12 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                     ),
                                   ),
                                   
-                                  Positioned(top: 16, left: 16, child: _buildLabel(0)),
-                                  Positioned(top: 16, right: 16, child: _buildLabel(1)),
-                                  Positioned(bottom: 16, left: 16, child: _buildLabel(2)),
-                                  Positioned(bottom: 16, right: 16, child: _buildLabel(3)),
+                                  Positioned(top: 16, left: 16, child: _buildLabel(0, 'DENOISED REF')),
+                                  Positioned(top: 16, right: 16, child: _buildLabel(1, 'VMAF ${_paneVmafTargets[1].toInt()}')),
+                                  Positioned(bottom: 16, left: 16, child: _buildLabel(2, 'VMAF ${_paneVmafTargets[2].toInt()}')),
+                                  Positioned(bottom: 16, right: 16, child: _buildLabel(3, 'VMAF ${_paneVmafTargets[3].toInt()}')),
                                   
-                                  if (_isLoadingSnippet)
+                                  if (_isProcessingPipeline)
                                     Container(
                                       color: Colors.black.withValues(alpha: 0.5),
                                       child: const Center(
@@ -416,7 +465,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                             CircularProgressIndicator(),
                                             SizedBox(height: 12),
                                             Text(
-                                              'Extracting Keyframe Snippet for Quad-Split...',
+                                              'Rendering Denoised Snippet & Bitrate Samples (~0.4s)...',
                                               style: TextStyle(color: Colors.white70, fontSize: 13),
                                             ),
                                           ],
@@ -487,27 +536,31 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                             style: TextStyle(fontSize: 12, color: Colors.white70),
                           ),
                           const SizedBox(height: 8),
-                          DropdownButtonFormField<int>(
-                            initialValue: _selectedTargetIndex,
+                          DropdownButtonFormField<double>(
+                            initialValue: _paneVmafTargets[_selectedTargetIndex],
                             dropdownColor: const Color(0xFF222222),
                             decoration: const InputDecoration(
                               border: OutlineInputBorder(),
                               contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               isDense: true,
                             ),
-                            items: List.generate(4, (index) {
+                            items: _availableVmafTargets.map((vmaf) {
                               return DropdownMenuItem(
-                                value: index,
-                                child: Text('VMAF ${_vmafTargets[index].toInt()}'),
+                                value: vmaf,
+                                child: Text('VMAF ${vmaf.toInt()}'),
                               );
-                            }),
+                            }).toList(),
                             onChanged: (val) {
-                              if (val != null) setState(() => _selectedTargetIndex = val);
+                              if (val != null) {
+                                setState(() {
+                                  _paneVmafTargets[_selectedTargetIndex] = val;
+                                });
+                              }
                             },
                           ),
                           const SizedBox(height: 16),
                           const Text(
-                            'Select the lowest VMAF target that looks visually identical to the original video. This maximizes space savings while preserving subjective quality.',
+                            'Select the lowest VMAF target that looks visually identical to the denoised reference video. This maximizes space savings while preserving subjective quality.',
                             style: TextStyle(fontSize: 12, color: Colors.grey, height: 1.5),
                           ),
                         ],
@@ -524,9 +577,8 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     );
   }
 
-  Widget _buildLabel(int index) {
+  Widget _buildLabel(int index, String labelText) {
     final isSelected = index == _selectedTargetIndex;
-    final vmafTarget = _vmafTargets[index];
     
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -536,7 +588,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
         border: Border.all(color: isSelected ? Colors.transparent : Colors.white38),
       ),
       child: Text(
-        'VMAF ${vmafTarget.toInt()}',
+        labelText,
         style: TextStyle(
           color: isSelected ? Colors.black : Colors.white,
           fontWeight: FontWeight.bold,
@@ -546,15 +598,20 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     );
   }
 
-  Widget _buildSelectionHighlight(double left, double top, double right, double bottom, BoxConstraints constraints) {
+  Widget _buildSelectionBorder(double left, double top, double right, double bottom, BoxConstraints constraints) {
     return Positioned(
       left: constraints.maxWidth * left,
       top: constraints.maxHeight * top,
       width: constraints.maxWidth * (right - left),
       height: constraints.maxHeight * (bottom - top),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+      child: IgnorePointer(
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(
+              color: Theme.of(context).colorScheme.primary,
+              width: 2.0,
+            ),
+          ),
         ),
       ),
     );

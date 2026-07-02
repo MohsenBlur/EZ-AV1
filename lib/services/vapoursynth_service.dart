@@ -6,6 +6,7 @@ import 'environment_service.dart';
 
 class VapourSynthService {
   /// Generates a VapourSynth .vpy script for previewing denoise filter strength.
+  /// Uses a gradual, professional noise std dev formula: h = denoiseStrength * 0.5 (range 0.1 to 5.0).
   static Future<String> generateDenoiseScript(
     double denoiseStrength, {
     String? customScript,
@@ -49,8 +50,11 @@ clip.set_output()
 ''';
       }
     } else {
-      final int d = denoiseStrength.round().clamp(1, 10);
-      final int h = d * 2;
+      // Gradual, professional denoise formula:
+      // h (filtering strength): 0.1 to 5.0 max to prevent smearing
+      // d (temporal radius): 1 for strength <= 4.0 (0 ghosting), 2 for > 4.0
+      final double h = (denoiseStrength * 0.5).clamp(0.1, 5.0);
+      final int d = denoiseStrength > 4.0 ? 2 : 1;
 
       if (sourceFilePath != null && sourceFilePath.isNotEmpty) {
         pythonScript = '''
@@ -66,7 +70,7 @@ except Exception:
 
 try:
     core.std.LoadPlugin(r"$escapedKnlPath")
-    denoised = core.knlm.KNLMeansCL(clip, d=$d, a=2, s=4, h=$h, channels="Y")
+    denoised = core.knlm.KNLMeansCL(clip, d=$d, a=2, s=4, h=${h.toStringAsFixed(2)}, channels="Y")
 except Exception as e:
     denoised = core.std.Convolution(clip, matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1])
     denoised = core.text.Text(denoised, f"GPU Denoise Fallback: {e}")
@@ -81,7 +85,7 @@ clip = video_in
 
 try:
     core.std.LoadPlugin(r"$escapedKnlPath")
-    denoised = core.knlm.KNLMeansCL(clip, d=$d, a=2, s=4, h=$h, channels="Y")
+    denoised = core.knlm.KNLMeansCL(clip, d=$d, a=2, s=4, h=${h.toStringAsFixed(2)}, channels="Y")
 except Exception as e:
     denoised = core.std.Convolution(clip, matrix=[1, 2, 1, 2, 4, 2, 1, 2, 1])
     denoised = core.text.Text(denoised, f"GPU Denoise Fallback: {e}")

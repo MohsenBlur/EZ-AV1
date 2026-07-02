@@ -221,7 +221,6 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
       );
     }
 
-    // Empty state if no valid video file is loaded
     if (_currentVideoPath == null || !File(_currentVideoPath!).existsSync()) {
       return Container(
         color: const Color(0xFF0F0F0F),
@@ -413,13 +412,13 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
                             value: _denoiseStrength,
                             min: 0,
                             max: 10,
-                            divisions: 20,
+                            divisions: 100,
                             onChanged: _onDenoiseChanged,
                             labelBuilder: (v) => v == 0 ? 'OFF' : v.toStringAsFixed(1),
                           ),
                           const SizedBox(height: 16),
                           const Text(
-                            'Drag the slider to preview KNLMeansCL denoise on the extracted keyframe snippet. Drag the center divider to compare Original vs Denoised.',
+                            'Drag the slider to adjust KNLMeansCL GPU denoise strength gradually. Drag the center divider to compare Original vs Denoised.',
                             style: TextStyle(fontSize: 12, color: Colors.grey, height: 1.5),
                           ),
                         ],
