@@ -85,13 +85,13 @@ class AppShell extends ConsumerWidget {
                     color: Theme.of(context).scaffoldBackgroundColor,
                     child: IndexedStack(
                       index: selectedIndex,
-                      children: const [
-                        FileImportView(),
-                        Phase0BypassView(),
-                        Phase1TextureView(),
-                        Phase2BitrateView(),
-                        Phase3ExecutionView(),
-                        Center(child: Text('Settings View')),
+                      children: [
+                        _LazyView(index: 0, selectedIndex: selectedIndex, child: const FileImportView()),
+                        _LazyView(index: 1, selectedIndex: selectedIndex, child: const Phase0BypassView()),
+                        _LazyView(index: 2, selectedIndex: selectedIndex, child: const Phase1TextureView()),
+                        _LazyView(index: 3, selectedIndex: selectedIndex, child: const Phase2BitrateView()),
+                        _LazyView(index: 4, selectedIndex: selectedIndex, child: const Phase3ExecutionView()),
+                        _LazyView(index: 5, selectedIndex: selectedIndex, child: const Center(child: Text('Settings View'))),
                       ],
                     ),
                   ),
@@ -124,6 +124,38 @@ class AppShell extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+class _LazyView extends StatefulWidget {
+  final int index;
+  final int selectedIndex;
+  final Widget child;
+
+  const _LazyView({
+    required this.index,
+    required this.selectedIndex,
+    required this.child,
+  });
+
+  @override
+  State<_LazyView> createState() => _LazyViewState();
+}
+
+class _LazyViewState extends State<_LazyView> {
+  bool _initialized = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.index == widget.selectedIndex) {
+      _initialized = true;
+    }
+
+    if (!_initialized) {
+      return const SizedBox.shrink();
+    }
+
+    return widget.child;
   }
 }
 
