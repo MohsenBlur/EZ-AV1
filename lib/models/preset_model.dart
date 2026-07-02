@@ -24,3 +24,17 @@ abstract class PresetModel with _$PresetModel {
   factory PresetModel.fromJson(Map<String, dynamic> json) => 
       _$PresetModelFromJson(json);
 }
+
+extension PresetModelConfigComparison on PresetModel {
+  /// Returns true if two PresetModels share the exact same encoding configuration,
+  /// ignoring unique identifier IDs.
+  bool isSameConfiguration(PresetModel? other) {
+    if (other == null) return false;
+    return name == other.name &&
+        denoiseStrength == other.denoiseStrength &&
+        photonNoise == other.photonNoise &&
+        targetVmaf == other.targetVmaf &&
+        audioBitrate == other.audioBitrate &&
+        downmixToStereo == other.downmixToStereo;
+  }
+}

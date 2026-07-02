@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ez_av1/models/batch_node_model.dart';
+import 'package:ez_av1/models/preset_model.dart';
 import 'package:ez_av1/providers/batch_queue_provider.dart';
 
 void main() {
@@ -89,6 +90,28 @@ void main() {
 
       final node = DirectoryNode.fromJson(jsonMap);
       expect(node.children, isEmpty);
+    });
+
+    test('_computeEffectiveState does not mark directory as mixed when children share identical configuration with different preset IDs', () async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      final notifier = container.read(batchQueueProvider.notifier);
+
+      final presetA = PresetModel(id: 'id_1', name: 'VMAF 95', denoiseStrength: 2.0, targetVmaf: 95.0);
+      final presetB = PresetModel(id: 'id_2', name: 'VMAF 95', denoiseStrength: 2.0, targetVmaf: 95.0);
+
+      final file1 = FileNode(id: 'f1', name: 'a.mp4', absolutePath: '/a.mp4', extension: '.mp4', sizeBytes: 100, assignedPreset: presetA);
+      final file2 = FileNode(id: 'f2', name: 'b.mp4', absolutePath: '/b.mp4', extension: '.mp4', sizeBytes: 100, assignedPreset: presetB);
+
+      final parentDir = DirectoryNode(id: 'd1', name: 'Dir', absolutePath: '/Dir', children: [file1, file2]);
+      notifier.state = [parentDir];
+
+      await notifier.assignPreset('f1', presetA);
+      await notifier.assignPreset('f2', presetB);
+
+      final updatedDir = notifier.state.first as DirectoryNode;
+      expect(updatedDir.hasMixedState, isFalse);
     });
   });
 }

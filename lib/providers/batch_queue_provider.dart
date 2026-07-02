@@ -218,7 +218,7 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
         if (isFirst) {
           firstChildPreset = childEffective;
           isFirst = false;
-        } else if (childEffective != firstChildPreset) {
+        } else if (_presetsDiffer(childEffective, firstChildPreset)) {
           hasMixed = true;
         }
 
@@ -232,5 +232,11 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     }
 
     return node.effectivePreset;
+  }
+
+  bool _presetsDiffer(PresetModel? p1, PresetModel? p2) {
+    if (p1 == null && p2 == null) return false;
+    if (p1 == null || p2 == null) return true;
+    return !p1.isSameConfiguration(p2);
   }
 }
