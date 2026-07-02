@@ -4,6 +4,7 @@ import '../../providers/navigation_provider.dart';
 import '../views/phase0_bypass_view.dart';
 import '../views/phase1_texture_view.dart';
 import '../views/phase2_bitrate_view.dart';
+import '../views/phase3_grain_view.dart';
 import '../views/phase3_execution_view.dart';
 import '../views/file_import_view.dart';
 import '../../providers/workflow_provider.dart';
@@ -56,19 +57,26 @@ class AppShell extends ConsumerWidget {
                   onTap: () => ref.read(selectedTabProvider.notifier).setTab(3),
                 ),
                 _SidebarIcon(
-                  icon: Icons.rocket_launch_rounded,
-                  label: 'Render',
+                  icon: Icons.grain_rounded,
+                  label: 'Grain',
                   isSelected: selectedIndex == 4,
                   isLocked: !workflowNotifier.isTabUnlocked(4),
                   onTap: () => ref.read(selectedTabProvider.notifier).setTab(4),
+                ),
+                _SidebarIcon(
+                  icon: Icons.rocket_launch_rounded,
+                  label: 'Render',
+                  isSelected: selectedIndex == 5,
+                  isLocked: !workflowNotifier.isTabUnlocked(5),
+                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(5),
                 ),
                 const Spacer(),
                 _SidebarIcon(
                   icon: Icons.settings_rounded,
                   label: 'Settings',
-                  isSelected: selectedIndex == 5,
+                  isSelected: selectedIndex == 6,
                   isLocked: false,
-                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(5),
+                  onTap: () => ref.read(selectedTabProvider.notifier).setTab(6),
                 ),
                 const SizedBox(height: 20),
               ],
@@ -90,8 +98,9 @@ class AppShell extends ConsumerWidget {
                         _LazyView(index: 1, selectedIndex: selectedIndex, child: const Phase0BypassView()),
                         _LazyView(index: 2, selectedIndex: selectedIndex, child: const Phase1TextureView()),
                         _LazyView(index: 3, selectedIndex: selectedIndex, child: const Phase2BitrateView()),
-                        _LazyView(index: 4, selectedIndex: selectedIndex, child: const Phase3ExecutionView()),
-                        _LazyView(index: 5, selectedIndex: selectedIndex, child: const Center(child: Text('Settings View'))),
+                        _LazyView(index: 4, selectedIndex: selectedIndex, child: const Phase3GrainView()),
+                        _LazyView(index: 5, selectedIndex: selectedIndex, child: const Phase3ExecutionView()),
+                        _LazyView(index: 6, selectedIndex: selectedIndex, child: const Center(child: Text('Settings View'))),
                       ],
                     ),
                   ),

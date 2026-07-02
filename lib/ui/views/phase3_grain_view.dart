@@ -10,74 +10,67 @@ import 'package:path_provider/path_provider.dart';
 import '../../providers/execution_provider.dart';
 import '../../providers/navigation_provider.dart';
 import '../../providers/workflow_provider.dart';
+import '../../providers/batch_queue_provider.dart';
+import '../../models/preset_model.dart';
 import '../../services/preview_service.dart';
 import '../../services/vapoursynth_service.dart';
+import '../../services/av1an_service.dart';
 import '../../services/environment_service.dart';
 import '../widgets/ez_panel.dart';
 
-class Phase2BitrateView extends ConsumerStatefulWidget {
-  const Phase2BitrateView({super.key});
+class Phase3GrainView extends ConsumerStatefulWidget {
+  const Phase3GrainView({super.key});
 
   @override
-  ConsumerState<Phase2BitrateView> createState() => _Phase2BitrateViewState();
+  ConsumerState<Phase3GrainView> createState() => _Phase3GrainViewState();
 }
 
-class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
-  final Map<int, Player> _players = {};
-  final Map<int, VideoController> _controllers = {};
+class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
+  late final Player _cleanPlayer;
+  late final VideoController _cleanController;
+  late final Player _grainPlayer;
+  late final VideoController _grainController;
+  
   final List<StreamSubscription> _subscriptions = [];
-  final Map<String, String> _paneCache = {};
-  
-  final List<double> _availableVmafTargets = [75.0, 80.0, 85.0, 88.0, 91.0, 93.0, 95.0, 97.0, 98.0];
-  late List<double> _paneVmafTargets;
-  int _selectedTargetIndex = 2; // Default to Pane 2
-  
+  Timer? _debounceTimer;
+
   bool _isPlaying = true;
   bool _isProcessingPipeline = false;
   String? _currentVideoPath;
   String? _denoisedSnippetPath;
   MediaColorProfile? _colorProfile;
-  
-  double _splitX = 0.5;
-  double _splitY = 0.5;
+
+  double _sliderPos = 0.5;
+  int _grainStrength = 15; // 0 = Off, 1-50 = SVT-AV1 Photon Noise
 
   @override
   void initState() {
     super.initState();
-    _paneVmafTargets = [95.0, 80.0, 88.0, 93.0]; // Pane 0 = Reference Denoised, Pane 1 = 80, Pane 2 = 88, Pane 3 = 93
+    _cleanPlayer = Player();
+    _cleanController = VideoController(_cleanPlayer);
+    _grainPlayer = Player();
+    _grainController = VideoController(_grainPlayer);
 
-    for (int i = 0; i < 4; i++) {
-      final player = Player();
-      _players[i] = player;
-      _controllers[i] = VideoController(player);
-      
-      player.setPlaylistMode(PlaylistMode.loop);
-      player.setVolume(0.0);
+    _cleanPlayer.setPlaylistMode(PlaylistMode.loop);
+    _cleanPlayer.setVolume(0.0);
+    _grainPlayer.setPlaylistMode(PlaylistMode.loop);
+    _grainPlayer.setVolume(0.0);
+
+    // Initial grain strength mapped from Phase 1 denoise strength or default 15
+    final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
+    if (denoiseStrength > 0) {
+      _grainStrength = Av1anService.calculatePhotonNoise(denoiseStrength);
+      if (_grainStrength <= 0) _grainStrength = 15;
     }
 
-    // Lockstep frame synchronization across all 4 quadrants
-    if (_players[0] != null) {
-      _subscriptions.add(_players[0]!.stream.position.listen((pos) {
-        if (!mounted || !_isPlaying) return;
-        for (int i = 1; i < 4; i++) {
-          final player = _players[i];
-          if (player != null && player.state.playing) {
-            final diff = (pos - player.state.position).inMilliseconds.abs();
-            if (diff > 50) {
-              player.seek(pos);
-            }
-          }
-        }
-      }));
+    _subscriptions.add(_cleanPlayer.stream.position.listen((pos) {
+      if (!mounted || !_isPlaying) return;
+      final diff = (pos - _grainPlayer.state.position).inMilliseconds.abs();
+      if (diff > 50) {
+        _grainPlayer.seek(pos);
+      }
+    }));
 
-      // Force instant loop resync across all 4 players when master loops
-      _subscriptions.add(_players[0]!.stream.completed.listen((completed) {
-        if (completed) {
-          _synchronousPlayAll();
-        }
-      }));
-    }
-      
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initMedia();
     });
@@ -102,10 +95,10 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       if (mounted) setState(() => _currentVideoPath = null);
       return;
     }
-    
+
     _currentVideoPath = validFiles.first;
     if (mounted) setState(() => _isProcessingPipeline = true);
-    
+
     try {
       _colorProfile = await PreviewService.detectColorProfile(_currentVideoPath!);
       final snippetPath = await PreviewService.extractKeyframeSnippet(_currentVideoPath!);
@@ -124,7 +117,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
         sourceFilePath: snippetPath,
       );
 
-      final denoisedPath = p.join(tempDir.path, 'ez_av1_phase2_denoised.mp4');
+      final denoisedPath = p.join(tempDir.path, 'ez_av1_phase3_denoised.mp4');
       _denoisedSnippetPath = await VapourSynthService.renderDenoisedPreview(
         scriptPath,
         denoisedPath,
@@ -132,48 +125,47 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       );
 
       final baseSnippet = File(_denoisedSnippetPath!).existsSync() ? _denoisedSnippetPath! : snippetPath;
+      final targetVmaf = ref.read(workflowProvider).targetVmaf;
+      final crf = _vmafToSvtCrf(targetVmaf);
 
-      // Pane 0: Reference Denoised Clip
-      await _players[0]?.open(Media(baseSnippet), play: false);
+      // 1. Render Clean AV1 Encode (Left side, grain = 0)
+      final cleanPath = p.join(tempDir.path, 'ez_av1_phase3_clean_${targetVmaf.toInt()}.mp4');
+      await _renderSvtAv1Pane(baseSnippet, cleanPath, crf, photonNoise: 0);
 
-      // Clean SVT-AV1 encodes for Panes 1, 2, and 3 (0 noise synthesis)
-      for (int i = 1; i < 4; i++) {
-        final panePath = await _getOrRenderPane(i, _paneVmafTargets[i], baseSnippet);
-        if (File(panePath).existsSync() && File(panePath).lengthSync() > 0) {
-          await _players[i]?.open(Media(panePath), play: false);
-        } else {
-          await _players[i]?.open(Media(baseSnippet), play: false);
-        }
+      // 2. Render Grain-Synthesized AV1 Encode (Right side, grain = _grainStrength)
+      final grainPath = p.join(tempDir.path, 'ez_av1_phase3_grain_$_grainStrength.mp4');
+      await _renderSvtAv1Pane(baseSnippet, grainPath, crf, photonNoise: _grainStrength);
+
+      if (File(cleanPath).existsSync() && File(cleanPath).lengthSync() > 0) {
+        await _cleanPlayer.open(Media(cleanPath), play: false);
+      } else {
+        await _cleanPlayer.open(Media(baseSnippet), play: false);
+      }
+
+      if (File(grainPath).existsSync() && File(grainPath).lengthSync() > 0) {
+        await _grainPlayer.open(Media(grainPath), play: false);
+      } else {
+        await _grainPlayer.open(Media(baseSnippet), play: false);
       }
 
       await _synchronousPlayAll();
     } catch (e) {
-      debugPrint('[Phase2] Pipeline processing error: $e');
+      debugPrint('[Phase3] Pipeline processing error: $e');
     } finally {
       if (mounted) setState(() => _isProcessingPipeline = false);
     }
   }
 
   Future<void> _synchronousPlayAll() async {
-    for (int i = 0; i < 4; i++) {
-      await _players[i]?.seek(Duration.zero);
-    }
+    await _cleanPlayer.seek(Duration.zero);
+    await _grainPlayer.seek(Duration.zero);
     if (_isPlaying) {
-      for (int i = 0; i < 4; i++) {
-        _players[i]?.play();
-      }
+      _cleanPlayer.play();
+      _grainPlayer.play();
     }
   }
 
-  Future<String> _getOrRenderPane(int paneIndex, double vmaf, String baseSnippet) async {
-    final cacheKey = '${paneIndex}_${vmaf.toInt()}';
-    if (_paneCache.containsKey(cacheKey)) {
-      final cached = _paneCache[cacheKey]!;
-      if (File(cached).existsSync() && File(cached).lengthSync() > 0) {
-        return cached;
-      }
-    }
-
+  Future<void> _renderSvtAv1Pane(String inputPath, String outputPath, int crf, {required int photonNoise}) async {
     Directory tempDir;
     try {
       tempDir = await getTemporaryDirectory();
@@ -181,34 +173,14 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       tempDir = Directory.systemTemp;
     }
 
-    final crf = _vmafToSvtCrf(vmaf);
-    final outputPath = p.join(tempDir.path, 'ez_av1_pane_${paneIndex}_${vmaf.toInt()}.mp4');
-    
-    await _renderSvtAv1Pane(baseSnippet, outputPath, crf);
-    if (File(outputPath).existsSync() && File(outputPath).lengthSync() > 0) {
-      _paneCache[cacheKey] = outputPath;
-    }
-    return outputPath;
-  }
-
-  /// Encodes clean SVT-AV1 clip (0 noise synthesis) with explicit color metadata (~0.4s).
-  Future<void> _renderSvtAv1Pane(String inputPath, String outputPath, int crf) async {
-    Directory tempDir;
-    try {
-      tempDir = await getTemporaryDirectory();
-    } catch (_) {
-      tempDir = Directory.systemTemp;
-    }
-
-    final ivfPath = p.join(tempDir.path, 'ez_av1_pane_$crf.ivf');
-
+    final ivfPath = p.join(tempDir.path, 'ez_av1_phase3_p${photonNoise}_c$crf.ivf');
     final svtArgs = <String>[
       '-i', 'stdin',
       '--preset', '8',
       '--rc', '0',
       '--crf', '$crf',
       if (_colorProfile != null) ..._colorProfile!.toSvtAv1Args(),
-      '--film-grain', '0',
+      if (photonNoise > 0) ...['--film-grain', '$photonNoise', '--film-grain-denoise', '0'],
       '-b', ivfPath,
     ];
 
@@ -268,47 +240,61 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
         );
       }
     } catch (e) {
-      debugPrint('[Phase2] SVT-AV1 encode exception: $e');
+      debugPrint('[Phase3] SVT-AV1 encode exception: $e');
     }
   }
 
-  void _onVmafTargetChanged(double newVmaf) async {
-    final index = _selectedTargetIndex;
-    if (index == 0) return;
-
+  void _onGrainStrengthChanged(double value) {
+    final newStrength = value.round();
     setState(() {
-      _paneVmafTargets[index] = newVmaf;
-      _isProcessingPipeline = true;
+      _grainStrength = newStrength;
     });
 
-    try {
-      final baseSnippet = (_denoisedSnippetPath != null && File(_denoisedSnippetPath!).existsSync())
-          ? _denoisedSnippetPath!
-          : _currentVideoPath!;
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      if (!mounted) return;
+      setState(() => _isProcessingPipeline = true);
 
-      final panePath = await _getOrRenderPane(index, newVmaf, baseSnippet);
+      try {
+        final baseSnippet = (_denoisedSnippetPath != null && File(_denoisedSnippetPath!).existsSync())
+            ? _denoisedSnippetPath!
+            : _currentVideoPath!;
 
-      if (mounted && File(panePath).existsSync() && File(panePath).lengthSync() > 0) {
-        final pos = _players[0]?.state.position ?? Duration.zero;
-        await _players[index]?.open(Media(panePath), play: _isPlaying);
-        await _players[index]?.seek(pos);
+        Directory tempDir;
+        try {
+          tempDir = await getTemporaryDirectory();
+        } catch (_) {
+          tempDir = Directory.systemTemp;
+        }
+
+        final targetVmaf = ref.read(workflowProvider).targetVmaf;
+        final crf = _vmafToSvtCrf(targetVmaf);
+        final grainPath = p.join(tempDir.path, 'ez_av1_phase3_grain_$_grainStrength.mp4');
+
+        await _renderSvtAv1Pane(baseSnippet, grainPath, crf, photonNoise: _grainStrength);
+
+        if (mounted && File(grainPath).existsSync() && File(grainPath).lengthSync() > 0) {
+          final pos = _cleanPlayer.state.position;
+          await _grainPlayer.open(Media(grainPath), play: _isPlaying);
+          await _grainPlayer.seek(pos);
+        }
+      } catch (e) {
+        debugPrint('[Phase3] Grain strength update error: $e');
+      } finally {
+        if (mounted) setState(() => _isProcessingPipeline = false);
       }
-    } catch (e) {
-      debugPrint('[Phase2] Update pane $index error: $e');
-    } finally {
-      if (mounted) setState(() => _isProcessingPipeline = false);
-    }
+    });
   }
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     for (final sub in _subscriptions) {
       sub.cancel();
     }
     _subscriptions.clear();
-    for (var player in _players.values) {
-      player.dispose();
-    }
+    _cleanPlayer.dispose();
+    _grainPlayer.dispose();
     super.dispose();
   }
 
@@ -316,19 +302,18 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     setState(() {
       _isPlaying = !_isPlaying;
     });
-    for (var player in _players.values) {
-      if (_isPlaying) {
-        player.play();
-      } else {
-        player.pause();
-      }
+    if (_isPlaying) {
+      _cleanPlayer.play();
+      _grainPlayer.play();
+    } else {
+      _cleanPlayer.pause();
+      _grainPlayer.pause();
     }
   }
 
   void _syncSeek(Duration position) {
-    for (var player in _players.values) {
-      player.seek(position);
-    }
+    _cleanPlayer.seek(position);
+    _grainPlayer.seek(position);
   }
 
   @override
@@ -390,7 +375,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Add video files in the Batch Queue to start bitrate efficiency testing.',
+                'Add video files in the Batch Queue to start film grain synthesis lock.',
                 style: TextStyle(color: Colors.white60, fontSize: 14),
               ),
               const SizedBox(height: 24),
@@ -428,7 +413,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
             child: Row(
               children: [
                 Text(
-                  'PHASE 2: BITRATE EFFICIENCY',
+                  'PHASE 3: GRAIN LOCK',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.primary,
                     fontWeight: FontWeight.bold,
@@ -438,17 +423,32 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                 const Spacer(),
                 ElevatedButton.icon(
                   onPressed: () {
-                    final selectedTarget = _paneVmafTargets[_selectedTargetIndex];
-                    ref.read(workflowProvider.notifier).completePhase2(selectedTarget);
-                    ref.read(selectedTabProvider.notifier).setTab(4); // Advance to Phase 3: Grain Lock
+                    final denoiseStrength = ref.read(workflowProvider).denoiseStrength;
+                    final targetVmaf = ref.read(workflowProvider).targetVmaf;
+                    final preset = PresetModel(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      name: 'EZ-AV1 VMAF ${targetVmaf.toInt()} Grain $_grainStrength',
+                      denoiseStrength: denoiseStrength,
+                      targetVmaf: targetVmaf,
+                      photonNoise: _grainStrength,
+                    );
+
+                    final batchNodes = ref.read(batchQueueProvider);
+                    final batchNotifier = ref.read(batchQueueProvider.notifier);
+                    for (var node in batchNodes) {
+                      batchNotifier.assignPreset(node.id, preset);
+                    }
+
+                    ref.read(workflowProvider.notifier).completePhase3(_grainStrength);
+                    ref.read(selectedTabProvider.notifier).setTab(5); // Phase 4 Execution
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
+                    backgroundColor: Colors.green,
                     foregroundColor: Colors.white,
                     minimumSize: const Size(140, 32),
                   ),
-                  icon: const Icon(Icons.arrow_forward_rounded, size: 16),
-                  label: const Text('PROCEED TO GRAIN LOCK', style: TextStyle(fontWeight: FontWeight.bold)),
+                  icon: const Icon(Icons.queue_play_next_rounded, size: 16),
+                  label: const Text('ADD TO QUEUE & RENDER', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
@@ -458,7 +458,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
           Expanded(
             child: Row(
               children: [
-                // Quad-Split Video Area
+                // Split Wipe View Area
                 Expanded(
                   flex: 3,
                   child: Container(
@@ -469,91 +469,50 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                           child: LayoutBuilder(
                             builder: (context, constraints) {
                               return GestureDetector(
-                                onPanUpdate: (details) {
+                                onHorizontalDragUpdate: (details) {
                                   setState(() {
-                                    _splitX += details.delta.dx / constraints.maxWidth;
-                                    _splitY += details.delta.dy / constraints.maxHeight;
-                                    _splitX = _splitX.clamp(0.0, 1.0);
-                                    _splitY = _splitY.clamp(0.0, 1.0);
-                                  });
-                                },
-                                onTapDown: (details) {
-                                  final x = details.localPosition.dx / constraints.maxWidth;
-                                  final y = details.localPosition.dy / constraints.maxHeight;
-
-                                  int selected = 0;
-                                  if (x < _splitX && y < _splitY) {
-                                    selected = 0;
-                                  } else if (x >= _splitX && y < _splitY) {
-                                    selected = 1;
-                                  } else if (x < _splitX && y >= _splitY) {
-                                    selected = 2;
-                                  } else if (x >= _splitX && y >= _splitY) {
-                                    selected = 3;
-                                  }
-
-                                  setState(() {
-                                    _selectedTargetIndex = selected;
+                                    _sliderPos += details.delta.dx / constraints.maxWidth;
+                                    _sliderPos = _sliderPos.clamp(0.0, 1.0);
                                   });
                                 },
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: [
-                                    Video(controller: _controllers[0]!, controls: NoVideoControls),
-                                    if (_selectedTargetIndex == 0) _buildSelectionBorder(0.0, 0.0, _splitX, _splitY, constraints),
-
+                                    Video(controller: _cleanController, controls: NoVideoControls),
                                     ClipRect(
-                                      clipper: _QuadClipper(_splitX, 0.0, 1.0, _splitY),
-                                      child: Video(controller: _controllers[1]!, controls: NoVideoControls),
+                                      clipper: _SideBySideClipper(_sliderPos),
+                                      child: Video(controller: _grainController, controls: NoVideoControls),
                                     ),
-                                    if (_selectedTargetIndex == 1) _buildSelectionBorder(_splitX, 0.0, 1.0, _splitY, constraints),
-
-                                    ClipRect(
-                                      clipper: _QuadClipper(0.0, _splitY, _splitX, 1.0),
-                                      child: Video(controller: _controllers[2]!, controls: NoVideoControls),
-                                    ),
-                                    if (_selectedTargetIndex == 2) _buildSelectionBorder(0.0, _splitY, _splitX, 1.0, constraints),
-
-                                    ClipRect(
-                                      clipper: _QuadClipper(_splitX, _splitY, 1.0, 1.0),
-                                      child: Video(controller: _controllers[3]!, controls: NoVideoControls),
-                                    ),
-                                    if (_selectedTargetIndex == 3) _buildSelectionBorder(_splitX, _splitY, 1.0, 1.0, constraints),
-
                                     Positioned(
-                                      left: constraints.maxWidth * _splitX - 1,
+                                      left: constraints.maxWidth * _sliderPos - 1,
                                       top: 0,
                                       bottom: 0,
                                       width: 2,
                                       child: Container(color: Theme.of(context).colorScheme.primary),
                                     ),
-
                                     Positioned(
-                                      top: constraints.maxHeight * _splitY - 1,
-                                      left: 0,
-                                      right: 0,
-                                      height: 2,
-                                      child: Container(color: Theme.of(context).colorScheme.primary),
-                                    ),
-
-                                    Positioned(
-                                      left: constraints.maxWidth * _splitX - 6,
-                                      top: constraints.maxHeight * _splitY - 6,
-                                      width: 12,
-                                      height: 12,
+                                      left: constraints.maxWidth * _sliderPos - 12,
+                                      top: constraints.maxHeight / 2 - 12,
+                                      width: 24,
+                                      height: 24,
                                       child: Container(
                                         decoration: const BoxDecoration(
                                           color: Colors.white,
                                           shape: BoxShape.circle,
                                         ),
+                                        child: const Icon(Icons.drag_handle_rounded, size: 16, color: Colors.black),
                                       ),
                                     ),
-
-                                    Positioned(top: 16, left: 16, child: _buildLabel(0, 'DENOISED REF')),
-                                    Positioned(top: 16, right: 16, child: _buildLabel(1, 'VMAF ${_paneVmafTargets[1].toInt()}')),
-                                    Positioned(bottom: 16, left: 16, child: _buildLabel(2, 'VMAF ${_paneVmafTargets[2].toInt()}')),
-                                    Positioned(bottom: 16, right: 16, child: _buildLabel(3, 'VMAF ${_paneVmafTargets[3].toInt()}')),
-
+                                    Positioned(
+                                      top: 16,
+                                      left: 16,
+                                      child: _buildLabel('CLEAN AV1 (NO NOISE)', isPrimary: false),
+                                    ),
+                                    Positioned(
+                                      top: 16,
+                                      right: 16,
+                                      child: _buildLabel('GRAIN SYNTHESIS ($_grainStrength)', isPrimary: true),
+                                    ),
                                     if (_isProcessingPipeline)
                                       Container(
                                         color: Colors.black.withValues(alpha: 0.5),
@@ -564,7 +523,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                               CircularProgressIndicator(),
                                               SizedBox(height: 12),
                                               Text(
-                                                'Rendering Clean SVT-AV1 Bitrate Samples (~0.4s)...',
+                                                'Rendering SVT-AV1 Synthetic Grain Preview (~0.4s)...',
                                                 style: TextStyle(color: Colors.white70, fontSize: 13),
                                               ),
                                             ],
@@ -588,7 +547,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                 icon: const Icon(Icons.replay_10_rounded),
                                 color: Colors.white,
                                 onPressed: () {
-                                  final pos = _players[0]?.state.position ?? Duration.zero;
+                                  final pos = _cleanPlayer.state.position;
                                   _syncSeek(pos - const Duration(seconds: 10));
                                 },
                               ),
@@ -602,14 +561,9 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                 icon: const Icon(Icons.forward_10_rounded),
                                 color: Colors.white,
                                 onPressed: () {
-                                  final pos = _players[0]?.state.position ?? Duration.zero;
+                                  final pos = _cleanPlayer.state.position;
                                   _syncSeek(pos + const Duration(seconds: 10));
                                 },
-                              ),
-                              const SizedBox(width: 16),
-                              const Text(
-                                'MASTER SYNC CONTROL',
-                                style: TextStyle(color: Colors.white54, fontSize: 10, letterSpacing: 1.0),
                               ),
                             ],
                           ),
@@ -619,6 +573,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                   ),
                 ),
 
+                // Right Inspector Panel
                 Container(
                   width: 320,
                   color: const Color(0xFF181818),
@@ -626,38 +581,29 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                   child: Column(
                     children: [
                       EzPanel(
-                        title: 'PRESET SETTINGS',
+                        title: 'GRAIN LOCK SETTINGS',
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            const Text(
-                              'Target VMAF (Quality)',
-                              style: TextStyle(fontSize: 12, color: Colors.white70),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Film Grain Strength', style: TextStyle(fontSize: 12, color: Colors.white70)),
+                                Text('Level $_grainStrength', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold)),
+                              ],
                             ),
                             const SizedBox(height: 8),
-                            DropdownButtonFormField<double>(
-                              initialValue: _paneVmafTargets[_selectedTargetIndex],
-                              dropdownColor: const Color(0xFF222222),
-                              decoration: const InputDecoration(
-                                border: OutlineInputBorder(),
-                                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                isDense: true,
-                              ),
-                              items: _availableVmafTargets.map((vmaf) {
-                                return DropdownMenuItem(
-                                  value: vmaf,
-                                  child: Text('VMAF ${vmaf.toInt()}'),
-                                );
-                              }).toList(),
-                              onChanged: (val) {
-                                if (val != null) {
-                                  _onVmafTargetChanged(val);
-                                }
-                              },
+                            Slider(
+                              value: _grainStrength.toDouble(),
+                              min: 0.0,
+                              max: 50.0,
+                              divisions: 50,
+                              label: '$_grainStrength',
+                              onChanged: _onGrainStrengthChanged,
                             ),
                             const SizedBox(height: 16),
                             const Text(
-                              'Select the lowest VMAF target that looks visually identical to the denoised reference video. This maximizes space savings while preserving subjective quality.',
+                              'SVT-AV1 synthesizes organic film grain on video frames during playback. This restores realistic texture without forcing the video encoder to waste bitrate on noise.',
                               style: TextStyle(fontSize: 12, color: Colors.grey, height: 1.5),
                             ),
                           ],
@@ -674,70 +620,38 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
     );
   }
 
-  Widget _buildLabel(int index, String labelText) {
-    final isSelected = index == _selectedTargetIndex;
-
+  Widget _buildLabel(String labelText, {required bool isPrimary}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: isSelected ? Theme.of(context).colorScheme.primary : Colors.black.withValues(alpha: 0.8),
+        color: isPrimary ? Theme.of(context).colorScheme.primary : Colors.black.withValues(alpha: 0.8),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: isSelected ? Colors.transparent : Colors.white38),
+        border: Border.all(color: isPrimary ? Colors.transparent : Colors.white38),
       ),
       child: Text(
         labelText,
         style: TextStyle(
-          color: isSelected ? Colors.black : Colors.white,
+          color: isPrimary ? Colors.black : Colors.white,
           fontWeight: FontWeight.bold,
           fontSize: 12,
         ),
       ),
     );
   }
-
-  Widget _buildSelectionBorder(double left, double top, double right, double bottom, BoxConstraints constraints) {
-    return Positioned(
-      left: constraints.maxWidth * left,
-      top: constraints.maxHeight * top,
-      width: constraints.maxWidth * (right - left),
-      height: constraints.maxHeight * (bottom - top),
-      child: IgnorePointer(
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: Theme.of(context).colorScheme.primary,
-              width: 2.0,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
-class _QuadClipper extends CustomClipper<Rect> {
-  final double left;
-  final double top;
-  final double right;
-  final double bottom;
+class _SideBySideClipper extends CustomClipper<Rect> {
+  final double fraction;
 
-  _QuadClipper(this.left, this.top, this.right, this.bottom);
+  _SideBySideClipper(this.fraction);
 
   @override
   Rect getClip(Size size) {
-    return Rect.fromLTRB(
-      size.width * left,
-      size.height * top,
-      size.width * right,
-      size.height * bottom,
-    );
+    return Rect.fromLTRB(size.width * fraction, 0, size.width, size.height);
   }
 
   @override
-  bool shouldReclip(_QuadClipper oldClipper) {
-    return left != oldClipper.left ||
-           top != oldClipper.top ||
-           right != oldClipper.right ||
-           bottom != oldClipper.bottom;
+  bool shouldReclip(_SideBySideClipper oldClipper) {
+    return fraction != oldClipper.fraction;
   }
 }
