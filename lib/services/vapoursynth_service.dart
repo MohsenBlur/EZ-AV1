@@ -52,7 +52,10 @@ core = vs.core
 try:
     clip = core.bs.VideoSource(source=r"$escapedSource")
 except Exception:
-    clip = core.ffms2.Source(source=r"$escapedSource")
+    try:
+        clip = core.ffms2.Source(source=r"$escapedSource")
+    except Exception:
+        clip = core.lsmas.LWLibavSource(source=r"$escapedSource")
 
 try:
     core.std.LoadPlugin(r"$escapedKnlPath")
@@ -86,6 +89,7 @@ denoised.set_output()
   }
 
   /// Renders a VapourSynth .vpy script to a preview MP4 file using VSPipe piped into FFmpeg (~0.15s).
+  /// Drains process stderr streams to prevent OS pipe deadlock and includes a 10s execution timeout.
   static Future<String> renderDenoisedPreview(String scriptPath, String outputPath) async {
     final stopwatch = Stopwatch()..start();
     debugPrint('[VapourSynthService] Rendering preview script to MP4: $scriptPath -> $outputPath');
@@ -116,9 +120,23 @@ denoised.set_output()
         environment: EnvironmentService.processEnvironment,
       );
 
-      p1.stdout.pipe(p2.stdin);
+      // Drain stderr streams to prevent OS pipe buffer deadlock
+      p1.stderr.listen((data) {});
+      p2.stderr.listen((data) {});
 
-      final exitCode = await p2.exitCode;
+      // Pipe VSPipe stdout into FFmpeg stdin and await completion
+      await p1.stdout.pipe(p2.stdin);
+
+      final exitCode = await p2.exitCode.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          debugPrint('[VapourSynthService] Render timed out after 10s');
+          p1.kill();
+          p2.kill();
+          return -1;
+        },
+      );
+
       final outputFile = File(outputPath);
 
       if (exitCode == 0 && outputFile.existsSync() && outputFile.lengthSync() > 0) {
