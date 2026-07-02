@@ -128,8 +128,8 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
           }
         } else if (entity is File) {
           final ext = p.extension(entity.path).toLowerCase();
-          // Filter for common video formats
-          if (const ['.mp4', '.mkv', '.avi', '.mov', '.webm'].contains(ext)) {
+          // Filter for supported video formats
+          if (supportedVideoExtensions.contains(ext)) {
             final stat = await entity.stat();
             nodes.add(FileNode(
               id: _uuid.v4(),

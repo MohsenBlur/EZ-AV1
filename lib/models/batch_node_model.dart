@@ -1,5 +1,7 @@
 import 'preset_model.dart';
 
+const supportedVideoExtensions = ['.mkv', '.mp4', '.mov', '.avi', '.m2ts', '.webm', '.flv', '.ts'];
+
 abstract class BatchNode {
   final String id;
   final String name;

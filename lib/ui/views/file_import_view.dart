@@ -9,8 +9,6 @@ import '../../providers/navigation_provider.dart';
 import '../../providers/batch_queue_provider.dart';
 import '../../models/batch_node_model.dart';
 
-const validExtensions = ['.mkv', '.mp4', '.mov', '.avi', '.m2ts', '.webm', '.flv'];
-
 class FileImportView extends ConsumerStatefulWidget {
   const FileImportView({super.key});
 
@@ -34,7 +32,7 @@ class _FileImportViewState extends ConsumerState<FileImportView> {
           await batchQueueNotifier.importDirectory(path);
         } else if (await FileSystemEntity.isFile(path)) {
           final ext = p.extension(path).toLowerCase();
-          if (validExtensions.contains(ext)) {
+          if (supportedVideoExtensions.contains(ext)) {
             filePathsToAdd.add(path);
           }
         }
@@ -85,7 +83,7 @@ class _FileImportViewState extends ConsumerState<FileImportView> {
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       type: FileType.custom,
-      allowedExtensions: validExtensions.map((e) => e.replaceAll('.', '')).toList(),
+      allowedExtensions: supportedVideoExtensions.map((e) => e.replaceAll('.', '')).toList(),
     );
 
     if (result != null && result.paths.isNotEmpty) {
