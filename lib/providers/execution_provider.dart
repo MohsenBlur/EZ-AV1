@@ -137,7 +137,20 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
     await _stderrSub?.cancel();
   }
 
+  List<String> _capLogLines(List<String> lines, {int maxLines = 500, int headLines = 50}) {
+    if (lines.length <= maxLines) return lines;
+    final head = lines.sublist(0, headLines);
+    final tailCount = maxLines - headLines - 1;
+    final tail = lines.sublist(lines.length - tailCount);
+    return [
+      ...head,
+      '--- [log output truncated: ${lines.length - maxLines} lines omitted] ---',
+      ...tail,
+    ];
+  }
+
   void _updateJob(String id, ExecutionJob Function(ExecutionJob) updater) {
+    if (!state.jobs.any((j) => j.id == id)) return;
     final newJobs = state.jobs.map((j) {
       if (j.id == id) return updater(j);
       return j;
@@ -149,7 +162,10 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
     state = state.copyWith(activeJobId: jobId);
     _updateJob(jobId, (j) => j.copyWith(status: JobStatus.encoding));
 
-    final job = state.jobs.firstWhere((j) => j.id == jobId);
+    final jobIndex = state.jobs.indexWhere((j) => j.id == jobId);
+    if (jobIndex == -1) return;
+    final job = state.jobs[jobIndex];
+
     final fileNode = job.node as FileNode;
     
     final preset = fileNode.effectivePreset;
@@ -195,12 +211,25 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
       List<String> pendingLogs = [];
 
       void handleLog(String data) {
-        // Regex for standard Av1an stderr: [12/100] 12.0% | 2.1 fps | ETA: 00:15:30
-        final percentMatch = RegExp(r'(\d+\.\d+)%').firstMatch(data);
-        final fpsMatch = RegExp(r'(\d+\.\d+)\s*fps').firstMatch(data);
-        final etaMatch = RegExp(r'ETA:\s*([0-9:]+)').firstMatch(data);
+        // Regex for Av1an stderr: [12/100] 12.0% | 2.1 fps | ETA: 00:15:30 (handles integer & decimal)
+        final percentMatch = RegExp(r'(\d+(?:\.\d+)?)%').firstMatch(data);
+        final fpsMatch = RegExp(r'(\d+(?:\.\d+)?)\s*fps', caseSensitive: false).firstMatch(data);
+        final etaMatch = RegExp(r'ETA:\s*([0-9:]+)', caseSensitive: false).firstMatch(data);
 
-        if (percentMatch != null) latestProgress = double.tryParse(percentMatch.group(1)!);
+        if (percentMatch != null) {
+          latestProgress = double.tryParse(percentMatch.group(1)!);
+        } else {
+          // Fallback: fraction format [12/100]
+          final fractionMatch = RegExp(r'\[(\d+)/(\d+)\]').firstMatch(data);
+          if (fractionMatch != null) {
+            final done = double.tryParse(fractionMatch.group(1)!);
+            final total = double.tryParse(fractionMatch.group(2)!);
+            if (done != null && total != null && total > 0) {
+              latestProgress = (done / total) * 100.0;
+            }
+          }
+        }
+
         if (fpsMatch != null) latestFps = double.tryParse(fpsMatch.group(1)!);
         if (etaMatch != null) latestEta = etaMatch.group(1);
 
@@ -210,15 +239,11 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
         if (watch.elapsedMilliseconds > 250) {
           _updateJob(jobId, (j) {
             final newLines = List<String>.from(j.logLines)..addAll(pendingLogs);
-            if (newLines.length > 200) {
-              newLines.removeRange(0, newLines.length - 200); // Keep buffer capped at 200 lines
-            }
-
             return j.copyWith(
               progress: latestProgress != null ? (latestProgress! / 100.0) : j.progress,
               fps: latestFps ?? j.fps,
               eta: latestEta ?? j.eta,
-              logLines: newLines,
+              logLines: _capLogLines(newLines),
             );
           });
           pendingLogs.clear();
@@ -226,24 +251,41 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
         }
       }
 
+      final stdoutDone = Completer<void>();
+      final stderrDone = Completer<void>();
+
       _stdoutSub = _activeProcess!.stdout
           .transform(const Utf8Decoder(allowMalformed: true))
           .transform(const LineSplitter())
-          .listen(handleLog);
+          .listen(
+            handleLog,
+            onDone: () => stdoutDone.complete(),
+            onError: (_) => stdoutDone.complete(),
+          );
       _stderrSub = _activeProcess!.stderr
           .transform(const Utf8Decoder(allowMalformed: true))
           .transform(const LineSplitter())
-          .listen(handleLog);
+          .listen(
+            handleLog,
+            onDone: () => stderrDone.complete(),
+            onError: (_) => stderrDone.complete(),
+          );
 
       final exitCode = await _activeProcess!.exitCode;
+
+      // Wait for stream completion up to 2 seconds
+      await Future.wait([
+        stdoutDone.future,
+        stderrDone.future,
+      ]).timeout(const Duration(seconds: 2), onTimeout: () => []);
 
       // Flush any remaining logs that were caught in the throttle buffer
       if (pendingLogs.isNotEmpty) {
         _updateJob(jobId, (j) {
           final newLines = List<String>.from(j.logLines)..addAll(pendingLogs);
-          if (newLines.length > 200) newLines.removeRange(0, newLines.length - 200);
-          return j.copyWith(logLines: newLines);
+          return j.copyWith(logLines: _capLogLines(newLines));
         });
+        pendingLogs.clear();
       }
 
       if (exitCode == 0) {
