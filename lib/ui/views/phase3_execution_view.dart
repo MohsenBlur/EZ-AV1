@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
 import '../../providers/execution_provider.dart';
 import '../../models/execution_model.dart';
 
@@ -18,6 +20,10 @@ class Phase3ExecutionView extends ConsumerWidget {
         ? validJobs.fold<double>(0, (sum, j) => sum + j.progress) / totalJobs 
         : 0.0;
 
+    final outputDirDisplay = (executionState.customOutputDirectory != null && executionState.customOutputDirectory!.isNotEmpty)
+        ? p.basename(executionState.customOutputDirectory!)
+        : 'Same as Source';
+
     return Column(
       children: [
         // Top Toolbar
@@ -29,8 +35,34 @@ class Phase3ExecutionView extends ConsumerWidget {
             children: [
               const Icon(Icons.rocket_launch_rounded, size: 20, color: Colors.white),
               const SizedBox(width: 12),
-              const Text('Phase 3: Execution Engine', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+              const Text('Phase 4: Execution Engine', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
               const Spacer(),
+              
+              // Output Folder Selector Button
+              OutlinedButton.icon(
+                onPressed: executionState.isRunning ? null : () async {
+                  final result = await FilePicker.platform.getDirectoryPath();
+                  if (result != null) {
+                    notifier.setCustomOutputDirectory(result);
+                  }
+                },
+                icon: const Icon(Icons.folder_open_rounded, size: 16),
+                label: Text('Output: $outputDirDisplay', style: const TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
+                ),
+              ),
+              if (executionState.customOutputDirectory != null)
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 16, color: Colors.grey),
+                  tooltip: 'Reset Output to Source Folder',
+                  onPressed: executionState.isRunning ? null : () => notifier.setCustomOutputDirectory(null),
+                ),
+              const SizedBox(width: 12),
+              Container(width: 1, height: 24, color: Colors.white24),
+              const SizedBox(width: 12),
+
               Row(
                 children: [
                   const Text('Low Spec Mode', style: TextStyle(color: Colors.white70, fontSize: 12)),

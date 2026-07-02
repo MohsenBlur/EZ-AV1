@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -179,7 +178,7 @@ class PreviewService {
   }
 
   /// Extracts a keyframe-aligned snippet from [videoPath] of approximately [targetDurationSec] seconds.
-  /// Dynamically detects and matches the source video's native color profile (zero guessing).
+  /// Uses a deterministic timestamp (25% of duration) so Phase 1, Phase 2, and Phase 3 share the EXACT same frame range.
   static Future<String> extractKeyframeSnippet(
     String videoPath, {
     double targetDurationSec = 3.0,
@@ -216,14 +215,13 @@ class PreviewService {
     final totalDurationSec = await getVideoDuration(videoPath);
     debugPrint('[PreviewService] Probed total video duration: ${totalDurationSec.toStringAsFixed(2)}s');
 
+    // 100% Deterministic start timestamp at 25% of total video duration for exact frame sync across Phase 1, 2, and 3
     double startSec = 0.0;
     if (totalDurationSec > targetDurationSec + 2.0) {
-      final minStart = totalDurationSec * 0.15;
-      final maxStart = totalDurationSec - (targetDurationSec + 2.0);
-      startSec = minStart + Random().nextDouble() * (maxStart - minStart);
+      startSec = totalDurationSec * 0.25;
     }
 
-    debugPrint('[PreviewService] Selected target start timestamp: ${startSec.toStringAsFixed(2)}s (Target duration: ${targetDurationSec}s)');
+    debugPrint('[PreviewService] Selected deterministic start timestamp: ${startSec.toStringAsFixed(2)}s (Target duration: ${targetDurationSec}s)');
 
     final args = <String>[
       '-ss', startSec.toStringAsFixed(3),

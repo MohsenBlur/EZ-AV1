@@ -18,6 +18,7 @@ class ExecutionState {
   final bool isRunning;
   final bool lowSpecMode;
   final bool overwriteFiles;
+  final String? customOutputDirectory;
   final String? activeJobId;
   
   ExecutionState({
@@ -25,6 +26,7 @@ class ExecutionState {
     this.isRunning = false,
     this.lowSpecMode = false,
     this.overwriteFiles = false,
+    this.customOutputDirectory,
     this.activeJobId,
   });
 
@@ -33,6 +35,7 @@ class ExecutionState {
     bool? isRunning,
     bool? lowSpecMode,
     bool? overwriteFiles,
+    String? customOutputDirectory,
     String? activeJobId,
   }) {
     return ExecutionState(
@@ -40,6 +43,7 @@ class ExecutionState {
       isRunning: isRunning ?? this.isRunning,
       lowSpecMode: lowSpecMode ?? this.lowSpecMode,
       overwriteFiles: overwriteFiles ?? this.overwriteFiles,
+      customOutputDirectory: customOutputDirectory ?? this.customOutputDirectory,
       activeJobId: activeJobId ?? this.activeJobId,
     );
   }
@@ -69,6 +73,17 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
     state = state.copyWith(lowSpecMode: value);
   }
 
+  void setCustomOutputDirectory(String? dir) {
+    state = ExecutionState(
+      jobs: state.jobs,
+      isRunning: state.isRunning,
+      lowSpecMode: state.lowSpecMode,
+      overwriteFiles: state.overwriteFiles,
+      customOutputDirectory: dir,
+      activeJobId: state.activeJobId,
+    );
+  }
+
   void _syncJobsFromQueue(List<BatchNode> nodes) {
     final files = BatchNode.extractFileNodes(nodes);
 
@@ -89,7 +104,10 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
     for (final job in state.jobs) {
       if (job.status == JobStatus.done) continue;
       final fileNode = job.node as FileNode;
-      final outputVideo = p.join(p.dirname(fileNode.absolutePath), '${p.basenameWithoutExtension(fileNode.name)}_av1.mkv');
+      final outputDir = (state.customOutputDirectory != null && state.customOutputDirectory!.isNotEmpty)
+          ? state.customOutputDirectory!
+          : p.dirname(fileNode.absolutePath);
+      final outputVideo = p.join(outputDir, '${p.basenameWithoutExtension(fileNode.name)}_av1.mkv');
       if (File(outputVideo).existsSync()) {
         existing.add(outputVideo);
       }
@@ -120,7 +138,6 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
     state = state.copyWith(isRunning: false);
     
     if (_activeProcess != null) {
-      // Aggressively kill the process tree in Windows
       if (Platform.isWindows) {
         try {
           await Process.run('taskkill', ['/F', '/T', '/PID', _activeProcess!.pid.toString()]);
@@ -174,8 +191,22 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
       return;
     }
 
-    // Determine output path (e.g. adjacent to original)
-    final outputVideo = p.join(p.dirname(fileNode.absolutePath), '${p.basenameWithoutExtension(fileNode.name)}_av1.mkv');
+    // Determine output path (User custom folder or adjacent to original)
+    final outputDir = (state.customOutputDirectory != null && state.customOutputDirectory!.isNotEmpty)
+        ? state.customOutputDirectory!
+        : p.dirname(fileNode.absolutePath);
+
+    final outDirObj = Directory(outputDir);
+    if (!outDirObj.existsSync()) {
+      try {
+        outDirObj.createSync(recursive: true);
+      } catch (e) {
+        _updateJob(jobId, (j) => j.copyWith(status: JobStatus.error, errorMessage: 'Cannot create output directory: $e'));
+        return;
+      }
+    }
+
+    final outputVideo = p.join(outputDir, '${p.basenameWithoutExtension(fileNode.name)}_av1.mkv');
 
     // Pre-flight file deletion to prevent Av1an hanging on overwrite prompts
     if (state.overwriteFiles) {
@@ -211,7 +242,6 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
       List<String> pendingLogs = [];
 
       void handleLog(String data) {
-        // Regex for Av1an stderr: [12/100] 12.0% | 2.1 fps | ETA: 00:15:30 (handles integer & decimal)
         final percentMatch = RegExp(r'(\d+(?:\.\d+)?)%').firstMatch(data);
         final fpsMatch = RegExp(r'(\d+(?:\.\d+)?)\s*fps', caseSensitive: false).firstMatch(data);
         final etaMatch = RegExp(r'ETA:\s*([0-9:]+)', caseSensitive: false).firstMatch(data);
@@ -219,7 +249,6 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
         if (percentMatch != null) {
           latestProgress = double.tryParse(percentMatch.group(1)!);
         } else {
-          // Fallback: fraction format [12/100]
           final fractionMatch = RegExp(r'\[(\d+)/(\d+)\]').firstMatch(data);
           if (fractionMatch != null) {
             final done = double.tryParse(fractionMatch.group(1)!);
@@ -235,7 +264,6 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
 
         pendingLogs.add(data);
 
-        // Throttle UI updates to roughly every 250ms without losing logs
         if (watch.elapsedMilliseconds > 250) {
           _updateJob(jobId, (j) {
             final newLines = List<String>.from(j.logLines)..addAll(pendingLogs);
@@ -273,13 +301,11 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
 
       final exitCode = await _activeProcess!.exitCode;
 
-      // Wait for stream completion up to 2 seconds
       await Future.wait([
         stdoutDone.future,
         stderrDone.future,
       ]).timeout(const Duration(seconds: 2), onTimeout: () => []);
 
-      // Flush any remaining logs that were caught in the throttle buffer
       if (pendingLogs.isNotEmpty) {
         _updateJob(jobId, (j) {
           final newLines = List<String>.from(j.logLines)..addAll(pendingLogs);
@@ -294,7 +320,6 @@ class ExecutionNotifier extends Notifier<ExecutionState> {
         if (state.isRunning) {
           _updateJob(jobId, (j) => j.copyWith(status: JobStatus.error, errorMessage: 'Process exited with code $exitCode'));
         } else {
-           // It was stopped by user
           _updateJob(jobId, (j) => j.copyWith(status: JobStatus.paused));
         }
       }

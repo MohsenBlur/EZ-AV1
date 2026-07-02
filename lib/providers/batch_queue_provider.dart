@@ -42,10 +42,14 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
         // Prune any nodes whose underlying files/directories no longer exist on disk
         final validNodes = _filterExistingNodes(diskNodes);
 
-        // Merge disk nodes with any nodes that were added before _loadState finished
-        final existingIds = {for (var n in state) n.id};
-        final newDiskNodes = validNodes.where((n) => !existingIds.contains(n.id)).toList();
-        state = [...newDiskNodes, ...state];
+        // Deduplicate by absolutePath
+        final existingPaths = BatchNode.extractFileNodes(state).map((n) => n.absolutePath).toSet();
+        final uniqueDiskNodes = validNodes.where((n) {
+          if (n is FileNode) return !existingPaths.contains(n.absolutePath);
+          return true;
+        }).toList();
+
+        state = [...uniqueDiskNodes, ...state];
         _recalculateState();
         _saveState();
       }
@@ -103,16 +107,27 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     if (!await dir.exists()) return;
 
     final rootNodes = await _parseDirectory(dir);
-    state = [...state, ...rootNodes];
+    
+    // Filter duplicates
+    final existingPaths = BatchNode.extractFileNodes(state).map((n) => n.absolutePath).toSet();
+    final uniqueNodes = rootNodes.where((n) {
+      if (n is FileNode) return !existingPaths.contains(n.absolutePath);
+      return true;
+    }).toList();
+
+    state = [...state, ...uniqueNodes];
     _recalculateState();
     _saveState();
   }
 
-  /// Adds a list of flat file paths to the queue
+  /// Adds a list of flat file paths to the queue without duplicates
   Future<void> addFiles(List<String> filePaths) async {
     await ensureInitialized();
+    final existingPaths = BatchNode.extractFileNodes(state).map((n) => n.absolutePath).toSet();
     final newNodes = <BatchNode>[];
+    
     for (final path in filePaths) {
+      if (existingPaths.contains(path)) continue; // Skip duplicate!
       final file = File(path);
       if (await file.exists()) {
         final stat = await file.stat();
@@ -123,8 +138,10 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
           extension: p.extension(path).toLowerCase(),
           sizeBytes: stat.size,
         ));
+        existingPaths.add(file.absolute.path);
       }
     }
+
     if (newNodes.isNotEmpty) {
       state = [...state, ...newNodes];
       _recalculateState();
@@ -231,7 +248,6 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     state = [...state];
   }
 
-  /// Computes effective presets based on inheritance (cascade vs override)
   PresetModel? _computeEffectiveState(BatchNode node, PresetModel? parentPreset) {
     node.effectivePreset = node.assignedPreset ?? parentPreset;
 
