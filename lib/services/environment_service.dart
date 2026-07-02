@@ -1,3 +1,4 @@
+import 'dart:ffi';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:flutter/foundation.dart';
@@ -55,36 +56,56 @@ class EnvironmentService {
     return missing;
   }
 
-  /// Initializes environment paths. Returns a list of missing components if any.
+  /// Initializes environment paths and pre-loads VapourSynth DLL dependencies.
+  /// Returns a list of missing components if any.
   static List<String> init() {
     final missing = getMissingBinaries();
     if (missing.isEmpty) {
       _injectPath();
+      _preloadVapourSynthDLLs();
     }
     return missing;
   }
 
-  /// Injects the bundled python directory into the current process's PATH
-  /// This ensures that when libmpv (or av1an) spawns child processes or 
-  /// looks for python/vapoursynth, it finds our portable ones first.
+  /// Injects the bundled python and bin directories into process PATH, DLL search path,
+  /// and sets VSSCRIPT_PATH for libmpv.
   static void _injectPath() {
     if (!Platform.isWindows) return;
 
-    final currentPath = Platform.environment['PATH'] ?? '';
-    
-    if (currentPath.contains(pythonDirectory)) return;
-
-    // Use FFI to actually mutate the C-runtime environment variable
-    // so that when Windows calls LoadLibrary('mpv-2.dll'), it will 
-    // find 'vapoursynth.dll' and 'python310.dll' lying around or in pythonDirectory.
+    // Use Win32 FFI to mutate process PATH and DLL search order
     NativePathHelper.prependToPath(binDirectory);
     NativePathHelper.prependToPath(pythonDirectory);
     
-    // Specifically tell mpv where VSScript.dll is, otherwise it disables the vf=vapoursynth filter!
+    // Set Win32 DLL Search Directory so Windows OS Loader finds python311.dll & VapourSynth.dll
+    NativePathHelper.setDllDirectory(pythonDirectory);
+    NativePathHelper.setDllDirectory(binDirectory);
+
+    // Tell mpv where VSScript.dll is
     final vsScriptPath = p.join(pythonDirectory, 'VSScript.dll');
     NativePathHelper.setEnvVar('VSSCRIPT_PATH', vsScriptPath);
-    
-    // For Av1an and FFmpeg, we will pass this new environment dictionary.
+    NativePathHelper.setEnvVar('PYTHONHOME', pythonDirectory);
+    NativePathHelper.setEnvVar('PYTHONPATH', pythonDirectory);
+  }
+
+  /// Pre-loads python311.dll, VapourSynth.dll, and VSScript.dll into process address space.
+  /// When libmpv runs LoadLibrary('VSScript.dll'), Windows will find them already loaded,
+  /// enabling vf=vapoursynth without 'Option vf: vapoursynth doesn't exist' errors.
+  static void _preloadVapourSynthDLLs() {
+    if (!Platform.isWindows) return;
+
+    try {
+      final python311 = p.join(pythonDirectory, 'python311.dll');
+      final vapourSynth = p.join(pythonDirectory, 'VapourSynth.dll');
+      final vsScript = p.join(pythonDirectory, 'VSScript.dll');
+
+      if (File(python311).existsSync()) DynamicLibrary.open(python311);
+      if (File(vapourSynth).existsSync()) DynamicLibrary.open(vapourSynth);
+      if (File(vsScript).existsSync()) DynamicLibrary.open(vsScript);
+
+      debugPrint('VapourSynth DLL dependencies pre-loaded successfully.');
+    } catch (e) {
+      debugPrint('VapourSynth DLL pre-load warning: $e');
+    }
   }
 
   /// Returns a map with the modified PATH environment variable
@@ -94,6 +115,9 @@ class EnvironmentService {
     if (Platform.isWindows) {
       final currentPath = env['PATH'] ?? '';
       env['PATH'] = '$pythonDirectory;$binDirectory;$currentPath';
+      env['VSSCRIPT_PATH'] = p.join(pythonDirectory, 'VSScript.dll');
+      env['PYTHONHOME'] = pythonDirectory;
+      env['PYTHONPATH'] = pythonDirectory;
     }
     return env;
   }

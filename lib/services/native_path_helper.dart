@@ -5,6 +5,9 @@ import 'package:ffi/ffi.dart';
 typedef SetEnvironmentVariableC = Int32 Function(Pointer<Utf16> lpName, Pointer<Utf16> lpValue);
 typedef SetEnvironmentVariableDart = int Function(Pointer<Utf16> lpName, Pointer<Utf16> lpValue);
 
+typedef SetDllDirectoryC = Int32 Function(Pointer<Utf16> lpPathName);
+typedef SetDllDirectoryDart = int Function(Pointer<Utf16> lpPathName);
+
 class NativePathHelper {
   static void prependToPath(String pathToAdd) {
     if (!Platform.isWindows) return;
@@ -56,5 +59,16 @@ class NativePathHelper {
     
     calloc.free(namePtr);
     calloc.free(valuePtr);
+  }
+
+  static void setDllDirectory(String path) {
+    if (!Platform.isWindows) return;
+    
+    final kernel32 = DynamicLibrary.open('kernel32.dll');
+    final setDllDir = kernel32.lookupFunction<SetDllDirectoryC, SetDllDirectoryDart>('SetDllDirectoryW');
+
+    final pathPtr = path.toNativeUtf16();
+    setDllDir(pathPtr);
+    calloc.free(pathPtr);
   }
 }

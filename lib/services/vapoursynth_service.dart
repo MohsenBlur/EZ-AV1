@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'environment_service.dart';
 
 class VapourSynthService {
   /// Generates a temporary .vpy script for the given video and denoise strength.
@@ -15,10 +16,21 @@ class VapourSynthService {
     final scriptPath = p.join(tempDir.path, 'ez_av1_preview.vpy');
     final file = File(scriptPath);
 
+    final knlPluginPath = p.join(EnvironmentService.pythonDirectory, 'KNLMeansCL.dll').replaceAll('\\', '/');
+
     // Build the script content for mpv vf=vapoursynth
     final sb = StringBuffer();
     sb.writeln('import vapoursynth as vs');
+    sb.writeln('import os');
     sb.writeln('core = vs.core');
+    sb.writeln('');
+    sb.writeln('# Explicitly load KNLMeansCL plugin if not autoloaded');
+    sb.writeln('knl_dll = r"$knlPluginPath"');
+    sb.writeln('if os.path.exists(knl_dll):');
+    sb.writeln('    try:');
+    sb.writeln('        core.std.LoadPlugin(knl_dll)');
+    sb.writeln('    except Exception:');
+    sb.writeln('        pass');
     sb.writeln('');
     sb.writeln('clip = video_in');
     
