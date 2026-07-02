@@ -11,16 +11,15 @@ class EnvironmentException implements Exception {
 }
 
 class EnvironmentService {
-  static late final String binDirectory;
-  static late final String pythonDirectory;
-  static late final String ffmpegPath;
-  static late final String ffprobePath;
-  static late final String av1anPath;
-  static late final String svtAv1Path;
+  static String binDirectory = '';
+  static String pythonDirectory = '';
+  static String ffmpegPath = '';
+  static String ffprobePath = '';
+  static String av1anPath = '';
+  static String svtAv1Path = '';
 
-  /// Initializes the environment by resolving the absolute paths
-  /// to the bundled portable binaries. Throws EnvironmentException if missing.
-  static void init() {
+  /// Resolves portable binary paths and returns a list of missing required files.
+  static List<String> getMissingBinaries() {
     String rootPath;
     
     if (kDebugMode) {
@@ -37,7 +36,6 @@ class EnvironmentService {
     av1anPath = p.join(binDirectory, 'av1an.exe');
     svtAv1Path = p.join(binDirectory, 'SvtAv1EncApp.exe');
 
-    // Physical File Validation
     final requiredBinaries = [
       ffmpegPath,
       ffprobePath,
@@ -47,13 +45,23 @@ class EnvironmentService {
       p.join(pythonDirectory, 'vapoursynth.dll'),
     ];
 
+    final missing = <String>[];
     for (final path in requiredBinaries) {
       if (!File(path).existsSync()) {
-        throw EnvironmentException('Missing critical component: ${p.basename(path)}');
+        missing.add(p.basename(path));
       }
     }
 
-    _injectPath();
+    return missing;
+  }
+
+  /// Initializes environment paths. Returns a list of missing components if any.
+  static List<String> init() {
+    final missing = getMissingBinaries();
+    if (missing.isEmpty) {
+      _injectPath();
+    }
+    return missing;
   }
 
   /// Injects the bundled python directory into the current process's PATH
