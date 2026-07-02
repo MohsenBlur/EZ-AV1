@@ -49,17 +49,6 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       _initMedia();
     });
 
-    // Master Clock Drift Enforcer
-    _players[0]?.stream.position.listen((masterPos) {
-      if (!_isPlaying) return;
-      for (int i = 1; i < 4; i++) {
-        final slavePos = _players[i]?.state.position ?? Duration.zero;
-        if ((masterPos - slavePos).inMilliseconds.abs() > 150) {
-          _players[i]?.seek(masterPos);
-        }
-      }
-    });
-
     // Snippet loop enforcer
     _players[0]?.stream.position.listen((pos) {
       if (_snippetStart != null && pos >= _snippetEnd!) {

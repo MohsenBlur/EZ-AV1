@@ -73,14 +73,6 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
         _filteredPlayer.seek(_snippetStart!);
       }
     });
-
-    // Master Clock Drift Enforcer
-    _originalPlayer.stream.position.listen((masterPos) {
-      final slavePos = _filteredPlayer.state.position;
-      if ((masterPos - slavePos).inMilliseconds.abs() > 150) {
-        _filteredPlayer.seek(masterPos);
-      }
-    });
     
     // Load initial media after first frame when ref is available
     WidgetsBinding.instance.addPostFrameCallback((_) {

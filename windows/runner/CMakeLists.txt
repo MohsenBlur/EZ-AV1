@@ -38,3 +38,15 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# --- EZ-AV1 VapourSynth Portable Bundling ---
+# This ensures mpv-2.dll can natively find VSScript.dll and VapourSynth plugins
+# without relying on runtime environment variable hacks.
+add_custom_command(
+  TARGET ${BINARY_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../assets/bin/python"
+  "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>"
+  COMMENT "Copying portable VapourSynth runtime to output directory"
+)
+

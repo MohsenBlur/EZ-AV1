@@ -33,11 +33,16 @@ void main() {
       expect(args.contains('-o'), isTrue);
       expect(args.contains(r'C:\My Videos\test_av1.mkv'), isTrue);
       
+      // Check top-level target quality
+      final tqIndex = args.indexOf('--target-quality');
+      expect(tqIndex, greaterThan(-1));
+      expect(args[tqIndex + 1], equals('95.0'));
+
       // Check video parameters
       final vIndex = args.indexOf('-v');
       expect(vIndex, greaterThan(-1));
       final videoParams = args[vIndex + 1];
-      expect(videoParams.contains('--target-quality 95.0'), isTrue);
+      expect(videoParams.contains('--target-quality'), isFalse);
       expect(videoParams.contains('--film-grain 10'), isTrue);
 
       // Check audio parameters

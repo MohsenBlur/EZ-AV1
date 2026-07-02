@@ -39,4 +39,22 @@ class NativePathHelper {
     
     calloc.free(namePtr);
   }
+
+  static void setEnvVar(String name, String value) {
+    if (!Platform.isWindows) return;
+    
+    final kernel32 = DynamicLibrary.open('kernel32.dll');
+    final setEnvVar = kernel32.lookupFunction<
+        Int32 Function(Pointer<Utf16> lpName, Pointer<Utf16> lpValue),
+        int Function(Pointer<Utf16> lpName, Pointer<Utf16> lpValue)
+    >('SetEnvironmentVariableW');
+
+    final namePtr = name.toNativeUtf16();
+    final valuePtr = value.toNativeUtf16();
+    
+    setEnvVar(namePtr, valuePtr);
+    
+    calloc.free(namePtr);
+    calloc.free(valuePtr);
+  }
 }

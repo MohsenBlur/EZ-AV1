@@ -72,6 +72,10 @@ class EnvironmentService {
     NativePathHelper.prependToPath(binDirectory);
     NativePathHelper.prependToPath(pythonDirectory);
     
+    // Specifically tell mpv where VSScript.dll is, otherwise it disables the vf=vapoursynth filter!
+    final vsScriptPath = p.join(pythonDirectory, 'VSScript.dll');
+    NativePathHelper.setEnvVar('VSSCRIPT_PATH', vsScriptPath);
+    
     // For Av1an and FFmpeg, we will pass this new environment dictionary.
   }
 

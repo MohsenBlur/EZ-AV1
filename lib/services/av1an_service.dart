@@ -31,13 +31,14 @@ class Av1anService {
     // Dart's Process.start naturally escapes arguments. Do not manually wrap in quotes.
     args.addAll(['-i', sourceVideo]);
     
+    // Av1an top-level target quality (VMAF probing)
+    args.addAll(['--target-quality', '${preset.targetVmaf}']);
+    
     // SVT-AV1 encoder flags
     final photonNoise = calculatePhotonNoise(preset.denoiseStrength);
     
     final videoParams = [
       '--preset', '4', // Good balance for SVT-AV1
-      // EXPERT POLISH: Av1an handles VMAF targeting natively via --target-quality, NOT --crf.
-      '--target-quality', '${preset.targetVmaf}', 
     ];
 
     if (photonNoise > 0) {
