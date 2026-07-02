@@ -254,13 +254,47 @@ class _JobCardState extends State<_JobCard> {
                 color: Colors.black,
                 borderRadius: BorderRadius.only(bottomLeft: Radius.circular(8), bottomRight: Radius.circular(8)),
               ),
-              child: SelectableText(
-                j.errorMessage ?? (j.logLines.isEmpty ? 'No logs available.' : j.logLines.join('\n')),
-                style: const TextStyle(
-                  fontFamily: 'Courier',
-                  fontSize: 11,
-                  color: Colors.greenAccent,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (j.errorMessage != null) ...[
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Error: ${j.errorMessage}',
+                              style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 280),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        j.logLines.isEmpty ? 'No logs available.' : j.logLines.join('\n'),
+                        style: const TextStyle(
+                          fontFamily: 'Courier',
+                          fontSize: 11,
+                          color: Colors.greenAccent,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
         ],
