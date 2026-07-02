@@ -35,6 +35,24 @@ class MediaColorProfile {
     }
     return args;
   }
+
+  List<String> toSvtAv1Args() {
+    if (colorSpace == 'bt2020nc' || colorSpace == 'bt2020c') {
+      return ['--color-primaries', '9', '--transfer-characteristics', '16', '--matrix-coefficients', '9', '--color-range', '0'];
+    } else if (colorSpace == 'smpte170m' || colorSpace == 'bt470bg') {
+      return ['--color-primaries', '6', '--transfer-characteristics', '6', '--matrix-coefficients', '6', '--color-range', '0'];
+    }
+    return ['--color-primaries', '1', '--transfer-characteristics', '1', '--matrix-coefficients', '1', '--color-range', '0'];
+  }
+
+  List<String> toAv1MetadataBsf() {
+    if (colorSpace == 'bt2020nc' || colorSpace == 'bt2020c') {
+      return ['-bsf:v', 'av1_metadata=color_primaries=9:transfer_characteristics=16:matrix_coefficients=9:color_range=tv'];
+    } else if (colorSpace == 'smpte170m' || colorSpace == 'bt470bg') {
+      return ['-bsf:v', 'av1_metadata=color_primaries=6:transfer_characteristics=6:matrix_coefficients=6:color_range=tv'];
+    }
+    return ['-bsf:v', 'av1_metadata=color_primaries=1:transfer_characteristics=1:matrix_coefficients=1:color_range=tv'];
+  }
 }
 
 class PreviewService {
