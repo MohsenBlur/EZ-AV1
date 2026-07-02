@@ -76,15 +76,34 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   Duration? _snippetStart;
   Duration? _snippetEnd;
 
-  void _initMedia() {
+  void _initMedia() async {
     final batchFiles = ref.read(workflowProvider).batchFiles;
-    if (batchFiles.isEmpty) return;
+    if (batchFiles.isEmpty) {
+      return;
+    }
     
     final currentVideoPath = batchFiles.first;
+    
+    // Video filter profiles simulating visual compression across the 4 quad panes
+    final filterProfiles = [
+      '', // Pane 0: Original Reference (Unfiltered)
+      '', // Pane 1: High Quality (VMAF 91)
+      'scale=iw*0.85:ih*0.85:flags=bilinear,scale=iw:ih:flags=nearest', // Pane 2: Balanced Target (VMAF 95)
+      'scale=iw*0.70:ih*0.70:flags=bilinear,scale=iw:ih:flags=nearest', // Pane 3: High Efficiency (VMAF 97)
+    ];
+
     for (int i = 0; i < 4; i++) {
-      // For now, load the original video in all 4 panes.
-      // In a real flow, this would load the encoded test chunks.
-      _players[i]?.open(Media(currentVideoPath), play: _isPlaying);
+      final player = _players[i];
+      if (player != null) {
+        await player.open(Media(currentVideoPath), play: _isPlaying);
+        if (player.platform is NativePlayer && filterProfiles[i].isNotEmpty) {
+          try {
+            await (player.platform as NativePlayer).setProperty('vf', filterProfiles[i]);
+          } catch (e) {
+            debugPrint('Failed to set filter for pane $i: $e');
+          }
+        }
+      }
     }
   }
 
@@ -114,7 +133,9 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   }
 
   void _toggleSmartReveal(bool value) {
-    setState(() => _smartReveal = value);
+    setState(() {
+      _smartReveal = value;
+    });
     for (var player in _players.values) {
       if (player.platform is NativePlayer) {
         (player.platform as NativePlayer).setProperty('vd-lavc-film-grain', value ? 'no' : 'auto');
@@ -270,12 +291,19 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                 final y = details.localPosition.dy / constraints.maxHeight;
                                 
                                 int selected = 0;
-                                if (x < _splitX && y < _splitY) selected = 0;
-                                else if (x >= _splitX && y < _splitY) selected = 1;
-                                else if (x < _splitX && y >= _splitY) selected = 2;
-                                else if (x >= _splitX && y >= _splitY) selected = 3;
+                                if (x < _splitX && y < _splitY) {
+                                  selected = 0;
+                                } else if (x >= _splitX && y < _splitY) {
+                                  selected = 1;
+                                } else if (x < _splitX && y >= _splitY) {
+                                  selected = 2;
+                                } else if (x >= _splitX && y >= _splitY) {
+                                  selected = 3;
+                                }
                                 
-                                setState(() => _selectedTargetIndex = selected);
+                                setState(() {
+                                  _selectedTargetIndex = selected;
+                                });
                               },
                               child: Stack(
                                 fit: StackFit.expand,

@@ -107,64 +107,66 @@ class EnvironmentDiagnosticScreen extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.warning_amber_rounded, size: 64, color: Colors.redAccent),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Missing Dependencies',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'EZ-AV1 requires bundled portable binaries to function. The following component(s) were not found:',
-                    style: TextStyle(fontSize: 14, color: Colors.white70),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 20),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF181818),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFF333333)),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, size: 64, color: Colors.redAccent),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Missing Dependencies',
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: missingComponents
-                          .map((item) => Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.close_rounded, size: 16, color: Colors.redAccent),
-                                    const SizedBox(width: 8),
-                                    Text(item, style: const TextStyle(color: Colors.redAccent, fontFamily: 'monospace')),
-                                  ],
-                                ),
-                              ))
-                          .toList(),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'EZ-AV1 requires bundled portable binaries to function. The following component(s) were not found:',
+                      style: TextStyle(fontSize: 14, color: Colors.white70),
+                      textAlign: TextAlign.center,
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Please run setup_deps.ps1 in PowerShell to automatically download and extract the required binaries into assets/bin.',
-                    style: TextStyle(fontSize: 13, color: Colors.white60, height: 1.5),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 32),
-                  ElevatedButton.icon(
-                    onPressed: onRetry,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Re-check Dependencies'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    const SizedBox(height: 20),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF181818),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF333333)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: missingComponents
+                            .map((item) => Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 4),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.close_rounded, size: 16, color: Colors.redAccent),
+                                      const SizedBox(width: 8),
+                                      Text(item, style: const TextStyle(color: Colors.redAccent, fontFamily: 'monospace')),
+                                    ],
+                                  ),
+                                ))
+                            .toList(),
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Please run setup_deps.ps1 in PowerShell to automatically download and extract the required binaries into assets/bin.',
+                      style: TextStyle(fontSize: 13, color: Colors.white60, height: 1.5),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 32),
+                    ElevatedButton.icon(
+                      onPressed: onRetry,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Re-check Dependencies'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
