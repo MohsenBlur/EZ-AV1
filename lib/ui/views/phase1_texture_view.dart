@@ -48,6 +48,13 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     _originalPlayer.setVolume(0.0);
     _filteredPlayer.setVolume(0.0);
     
+    // Debug Logging for VapourSynth filter diagnostics
+    _filteredPlayer.stream.log.listen((event) {
+      if (event.text.toLowerCase().contains('vapoursynth') || event.text.toLowerCase().contains('vf')) {
+        debugPrint('MPV Filter Log: ${event.level} - ${event.text}');
+      }
+    });
+    
     // Snippet loop enforcer
     _originalPlayer.stream.position.listen((pos) {
       if (_snippetStart != null && pos >= _snippetEnd!) {
@@ -95,6 +102,11 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
       
       // Initially set an empty script just to initialize the filter chain
       try {
+        if (_filteredPlayer.platform is NativePlayer) {
+          // Hardware decoding MUST be disabled or set to copy-back for software filters to work!
+          await (_filteredPlayer.platform as NativePlayer).setProperty('hwdec', 'no');
+        }
+        
         final scriptPath = await VapourSynthService.generateDenoiseScript(_denoiseStrength);
         if (_filteredPlayer.platform is NativePlayer) {
           final escapedPath = scriptPath.replaceAll('\\', '/');
