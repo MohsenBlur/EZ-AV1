@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -38,15 +39,46 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
         final List<dynamic> jsonList = jsonDecode(content);
         final diskNodes = jsonList.map((e) => BatchNode.fromJson(e as Map<String, dynamic>)).toList();
 
+        // Prune any nodes whose underlying files/directories no longer exist on disk
+        final validNodes = _filterExistingNodes(diskNodes);
+
         // Merge disk nodes with any nodes that were added before _loadState finished
         final existingIds = {for (var n in state) n.id};
-        final newDiskNodes = diskNodes.where((n) => !existingIds.contains(n.id)).toList();
+        final newDiskNodes = validNodes.where((n) => !existingIds.contains(n.id)).toList();
         state = [...newDiskNodes, ...state];
         _recalculateState();
+        _saveState();
       }
     } catch (e) {
       // Ignore load errors, start fresh
     }
+  }
+
+  List<BatchNode> _filterExistingNodes(List<BatchNode> nodes) {
+    final result = <BatchNode>[];
+    for (final node in nodes) {
+      if (node is FileNode) {
+        if (File(node.absolutePath).existsSync()) {
+          result.add(node);
+        } else {
+          debugPrint('Pruned non-existent batch file from session: ${node.absolutePath}');
+        }
+      } else if (node is DirectoryNode) {
+        final validChildren = _filterExistingNodes(node.children);
+        if (validChildren.isNotEmpty) {
+          result.add(DirectoryNode(
+            id: node.id,
+            name: node.name,
+            absolutePath: node.absolutePath,
+            assignedPreset: node.assignedPreset,
+            children: validChildren,
+          ));
+        } else {
+          debugPrint('Pruned non-existent directory from session: ${node.absolutePath}');
+        }
+      }
+    }
+    return result;
   }
 
   Future<void> _saveState() async {
@@ -104,7 +136,6 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     final nodes = <BatchNode>[];
     try {
       final entities = await dir.list().toList();
-      // Sort: directories first, then files alphabetically
       entities.sort((a, b) {
         if (a is Directory && b is File) return -1;
         if (a is File && b is Directory) return 1;
@@ -117,7 +148,6 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
 
         if (entity is Directory) {
           final children = await _parseDirectory(entity);
-          // Only add directories that contain video files eventually
           if (children.isNotEmpty) {
             nodes.add(DirectoryNode(
               id: _uuid.v4(),
@@ -128,7 +158,6 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
           }
         } else if (entity is File) {
           final ext = p.extension(entity.path).toLowerCase();
-          // Filter for supported video formats
           if (supportedVideoExtensions.contains(ext)) {
             final stat = await entity.stat();
             nodes.add(FileNode(
@@ -199,7 +228,6 @@ class BatchQueueNotifier extends Notifier<List<BatchNode>> {
     for (var node in state) {
       _computeEffectiveState(node, null);
     }
-    // Trigger UI rebuild by creating a shallow copy of the top level list
     state = [...state];
   }
 

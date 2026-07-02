@@ -10,6 +10,10 @@ class PreviewService {
 
   /// Multi-fallback container duration probing in seconds (~5ms execution).
   static Future<double> getVideoDuration(String videoPath) async {
+    if (videoPath.isEmpty || !File(videoPath).existsSync()) {
+      return 0.0;
+    }
+
     try {
       // 1. Format duration
       final result1 = await Process.run(
@@ -85,6 +89,11 @@ class PreviewService {
     double targetDurationSec = 3.0,
     bool forceReextract = false,
   }) async {
+    if (videoPath.isEmpty || !File(videoPath).existsSync()) {
+      debugPrint('[PreviewService] Cannot extract snippet, file does not exist on disk: $videoPath');
+      return '';
+    }
+
     final stopwatch = Stopwatch()..start();
     debugPrint('[PreviewService] Starting keyframe snippet extraction for: $videoPath');
 
@@ -182,7 +191,6 @@ class PreviewService {
       debugPrint('[PreviewService] Fallback re-encode exception: $e');
     }
 
-    // Fallback to raw input video if extraction completely fails
     return videoPath;
   }
 

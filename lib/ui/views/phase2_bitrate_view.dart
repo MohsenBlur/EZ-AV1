@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,7 +21,6 @@ class Phase2BitrateView extends ConsumerStatefulWidget {
 }
 
 class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
-  // 4 players for the Quad-Split comparison
   final Map<int, Player> _players = {};
   final Map<int, VideoController> _controllers = {};
   final List<StreamSubscription> _subscriptions = [];
@@ -32,25 +32,21 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
   bool _isLoadingSnippet = false;
   String? _currentVideoPath;
   
-  // Wipe crosshair coordinates (0.0 to 1.0)
   double _splitX = 0.5;
   double _splitY = 0.5;
 
   @override
   void initState() {
     super.initState();
-    // Initialize 4 players
     for (int i = 0; i < 4; i++) {
       final player = Player();
       _players[i] = player;
       _controllers[i] = VideoController(player);
       
-      // Configure looping for seamless visual comparison of small chunks
       player.setPlaylistMode(PlaylistMode.loop);
       player.setVolume(0.0);
     }
 
-    // Master sync guardrail: keep quad players 1, 2, and 3 locked to player 0
     if (_players[0] != null) {
       _subscriptions.add(_players[0]!.stream.position.listen((pos) {
         if (!mounted || !_isPlaying) return;
@@ -73,29 +69,32 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
 
   void _initMedia() async {
     final batchFiles = ref.read(workflowProvider).batchFiles;
-    if (batchFiles.isEmpty) {
+    final validFiles = batchFiles.where((f) => File(f).existsSync()).toList();
+    if (validFiles.isEmpty) {
+      if (mounted) setState(() => _currentVideoPath = null);
       return;
     }
     
-    _currentVideoPath = batchFiles.first;
+    _currentVideoPath = validFiles.first;
     if (mounted) setState(() => _isLoadingSnippet = true);
     
     String snippetPath;
     try {
       snippetPath = await PreviewService.extractKeyframeSnippet(_currentVideoPath!);
     } catch (e) {
-      debugPrint('Snippet extraction error in Phase 2: $e');
+      debugPrint('[Phase2] Snippet extraction error: $e');
       snippetPath = _currentVideoPath!;
     } finally {
       if (mounted) setState(() => _isLoadingSnippet = false);
     }
+
+    if (!File(snippetPath).existsSync()) return;
     
-    // Video filter profiles simulating visual compression across the 4 quad panes
     final filterProfiles = [
-      '', // Pane 0: Original Reference (Unfiltered)
-      '', // Pane 1: High Quality (VMAF 91)
-      'scale=iw*0.85:ih*0.85:flags=bilinear,scale=iw:ih:flags=nearest', // Pane 2: Balanced Target (VMAF 95)
-      'scale=iw*0.70:ih*0.70:flags=bilinear,scale=iw:ih:flags=nearest', // Pane 3: High Efficiency (VMAF 97)
+      '', // Pane 0: Original Reference
+      '', // Pane 1: High Quality
+      'scale=iw*0.85:ih*0.85:flags=bilinear,scale=iw:ih:flags=nearest', // Pane 2: Balanced Target
+      'scale=iw*0.70:ih*0.70:flags=bilinear,scale=iw:ih:flags=nearest', // Pane 3: High Efficiency
     ];
 
     for (int i = 0; i < 4; i++) {
@@ -157,14 +156,12 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
 
   @override
   Widget build(BuildContext context) {
-    // Listen for batch queue changes to auto-update video player if selection changes
     ref.listenManual(workflowProvider.select((w) => w.batchFiles), (previous, next) {
       if (next.isNotEmpty && next.first != _currentVideoPath) {
         _initMedia();
       }
     });
 
-    // Watch execution state for resource suspension
     final isRendering = ref.watch(executionProvider.select((s) => s.isRunning));
 
     if (isRendering) {
@@ -193,6 +190,40 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.orangeAccent,
                   side: const BorderSide(color: Colors.orangeAccent),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_currentVideoPath == null || !File(_currentVideoPath!).existsSync()) {
+      return Container(
+        color: const Color(0xFF0F0F0F),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.video_library_outlined, size: 64, color: Colors.white38),
+              const SizedBox(height: 24),
+              const Text(
+                'No Active Video Selected',
+                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Add video files in the Batch Queue to start bitrate efficiency testing.',
+                style: TextStyle(color: Colors.white60, fontSize: 14),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () => ref.read(selectedTabProvider.notifier).setTab(0),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Go to Batch Queue'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Colors.black,
                 ),
               ),
             ],
@@ -253,7 +284,6 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                     photonNoise: _smartReveal ? 0 : (denoiseStrength > 0 ? 0 : 20),
                   );
                   
-                  // Apply to all files for the quick flow
                   final batchNodes = ref.read(batchQueueProvider);
                   final batchNotifier = ref.read(batchQueueProvider.notifier);
                   for (var node in batchNodes) {
@@ -264,7 +294,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                   ref.read(selectedTabProvider.notifier).setTab(4); // Execution
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green, // Queue button color
+                  backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
                   minimumSize: const Size(120, 32),
                 ),
@@ -321,32 +351,27 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                               child: Stack(
                                 fit: StackFit.expand,
                                 children: [
-                                  // Video 0 (Top-Left) is the base layer
                                   Video(controller: _controllers[0]!, controls: NoVideoControls),
                                   if (_selectedTargetIndex == 0) _buildSelectionHighlight(0.0, 0.0, _splitX, _splitY, constraints),
                                   
-                                  // Video 1 (Top-Right)
                                   ClipRect(
                                     clipper: _QuadClipper(_splitX, 0.0, 1.0, _splitY),
                                     child: Video(controller: _controllers[1]!, controls: NoVideoControls),
                                   ),
                                   if (_selectedTargetIndex == 1) _buildSelectionHighlight(_splitX, 0.0, 1.0, _splitY, constraints),
                                   
-                                  // Video 2 (Bottom-Left)
                                   ClipRect(
                                     clipper: _QuadClipper(0.0, _splitY, _splitX, 1.0),
                                     child: Video(controller: _controllers[2]!, controls: NoVideoControls),
                                   ),
                                   if (_selectedTargetIndex == 2) _buildSelectionHighlight(0.0, _splitY, _splitX, 1.0, constraints),
                                   
-                                  // Video 3 (Bottom-Right)
                                   ClipRect(
                                     clipper: _QuadClipper(_splitX, _splitY, 1.0, 1.0),
                                     child: Video(controller: _controllers[3]!, controls: NoVideoControls),
                                   ),
                                   if (_selectedTargetIndex == 3) _buildSelectionHighlight(_splitX, _splitY, 1.0, 1.0, constraints),
                                   
-                                  // Crosshair Vertical Line
                                   Positioned(
                                     left: constraints.maxWidth * _splitX - 1,
                                     top: 0,
@@ -355,7 +380,6 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                     child: Container(color: Theme.of(context).colorScheme.primary),
                                   ),
                                   
-                                  // Crosshair Horizontal Line
                                   Positioned(
                                     top: constraints.maxHeight * _splitY - 1,
                                     left: 0,
@@ -364,7 +388,6 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                     child: Container(color: Theme.of(context).colorScheme.primary),
                                   ),
                                   
-                                  // Crosshair Center Node
                                   Positioned(
                                     left: constraints.maxWidth * _splitX - 6,
                                     top: constraints.maxHeight * _splitY - 6,
@@ -378,7 +401,6 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                                     ),
                                   ),
                                   
-                                  // Corner Labels
                                   Positioned(top: 16, left: 16, child: _buildLabel(0)),
                                   Positioned(top: 16, right: 16, child: _buildLabel(1)),
                                   Positioned(bottom: 16, left: 16, child: _buildLabel(2)),
@@ -408,7 +430,6 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                         ),
                       ),
                       
-                      // Unified Master Playback Bar
                       Container(
                         height: 48,
                         color: const Color(0xFF181818),
@@ -450,7 +471,6 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
                 ),
               ),
               
-              // Inspector Panel
               Container(
                 width: 320,
                 color: const Color(0xFF181818),

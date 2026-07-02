@@ -78,7 +78,13 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
   Future<void> _initMedia() async {
     final batchFiles = ref.read(workflowProvider).batchFiles;
     if (batchFiles.isNotEmpty) {
-      _currentVideoPath = batchFiles.first;
+      final validFiles = batchFiles.where((f) => File(f).existsSync()).toList();
+      if (validFiles.isEmpty) {
+        if (mounted) setState(() => _currentVideoPath = null);
+        return;
+      }
+
+      _currentVideoPath = validFiles.first;
       if (mounted) setState(() => _isLoadingSnippet = true);
       
       try {
@@ -90,12 +96,18 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
         if (mounted) setState(() => _isLoadingSnippet = false);
       }
       
-      final mediaPath = _snippetPath ?? _currentVideoPath!;
-      await _updateDenoisedPreview(mediaPath);
+      final mediaPath = (_snippetPath != null && _snippetPath!.isNotEmpty && File(_snippetPath!).existsSync())
+          ? _snippetPath!
+          : _currentVideoPath!;
+
+      if (File(mediaPath).existsSync()) {
+        await _updateDenoisedPreview(mediaPath);
+      }
     }
   }
 
   Future<void> _updateDenoisedPreview(String snippetPath) async {
+    if (!File(snippetPath).existsSync()) return;
     if (mounted) setState(() => _isCompilingScript = true);
 
     try {
@@ -118,12 +130,15 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
         _denoisedPreviewPath!,
       );
 
-      // Open snippet in original player and rendered denoised video in filtered player
-      await _originalPlayer.open(Media(snippetPath), play: true);
+      if (!mounted) return;
+
+      if (File(snippetPath).existsSync()) {
+        await _originalPlayer.open(Media(snippetPath), play: true);
+      }
       
       if (File(renderedPath).existsSync() && File(renderedPath).lengthSync() > 0) {
         await _filteredPlayer.open(Media(renderedPath), play: true);
-      } else {
+      } else if (File(snippetPath).existsSync()) {
         await _filteredPlayer.open(Media(snippetPath), play: true);
       }
     } catch (e) {
@@ -154,7 +169,10 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
     _debounce = Timer(const Duration(milliseconds: 300), () async {
       if (_snippetPath != null || _currentVideoPath != null) {
-        await _updateDenoisedPreview(_snippetPath ?? _currentVideoPath!);
+        final targetPath = _snippetPath ?? _currentVideoPath!;
+        if (File(targetPath).existsSync()) {
+          await _updateDenoisedPreview(targetPath);
+        }
       }
     });
   }
@@ -195,6 +213,41 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.orangeAccent,
                   side: const BorderSide(color: Colors.orangeAccent),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Empty state if no valid video file is loaded
+    if (_currentVideoPath == null || !File(_currentVideoPath!).existsSync()) {
+      return Container(
+        color: const Color(0xFF0F0F0F),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.video_library_outlined, size: 64, color: Colors.white38),
+              const SizedBox(height: 24),
+              const Text(
+                'No Active Video Selected',
+                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Add video files in the Batch Queue to start texture previewing.',
+                style: TextStyle(color: Colors.white60, fontSize: 14),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () => ref.read(selectedTabProvider.notifier).setTab(0),
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Go to Batch Queue'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Colors.black,
                 ),
               ),
             ],
