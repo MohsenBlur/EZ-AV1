@@ -55,13 +55,20 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
     _originalPlayer.setVolume(0.0);
     _filteredPlayer.setVolume(0.0);
 
-    // Frame synchronization guardrail: keeps filtered layer locked to original player
+    // Frame synchronization guardrail: tight 15ms threshold (~0.3 frames at 24fps) for exact frame parity
     _subscriptions.add(_originalPlayer.stream.position.listen((pos) {
       if (!mounted || !_originalPlayer.state.playing) return;
       final filteredPos = _filteredPlayer.state.position;
       final diff = (pos - filteredPos).inMilliseconds.abs();
-      if (diff > 250) {
+      if (diff > 15) {
         _filteredPlayer.seek(pos);
+      }
+    }));
+
+    _subscriptions.add(_originalPlayer.stream.completed.listen((completed) {
+      if (completed) {
+        _originalPlayer.seek(Duration.zero);
+        _filteredPlayer.seek(Duration.zero);
       }
     }));
     
@@ -152,14 +159,19 @@ class _Phase1TextureViewState extends ConsumerState<Phase1TextureView> {
 
       if (!mounted) return;
 
+      final pos = _originalPlayer.state.position;
+
       if (File(snippetPath).existsSync()) {
         await _originalPlayer.open(Media(snippetPath), play: true);
+        await _originalPlayer.seek(pos);
       }
       
       if (File(renderedPath).existsSync() && File(renderedPath).lengthSync() > 0) {
         await _filteredPlayer.open(Media(renderedPath), play: true);
+        await _filteredPlayer.seek(pos);
       } else if (File(snippetPath).existsSync()) {
         await _filteredPlayer.open(Media(snippetPath), play: true);
+        await _filteredPlayer.seek(pos);
       }
     } catch (e) {
       debugPrint('[Phase1] Denoise preview render exception: $e');

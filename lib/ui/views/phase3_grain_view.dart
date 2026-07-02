@@ -64,11 +64,19 @@ class _Phase3GrainViewState extends ConsumerState<Phase3GrainView> {
       if (_grainStrength <= 0) _grainStrength = 15;
     }
 
+    // Frame synchronization guardrail: tight 15ms threshold (~0.3 frames at 24fps) for exact frame parity
     _subscriptions.add(_cleanPlayer.stream.position.listen((pos) {
       if (!mounted || !_isPlaying) return;
       final diff = (pos - _grainPlayer.state.position).inMilliseconds.abs();
-      if (diff > 50) {
+      if (diff > 15) {
         _grainPlayer.seek(pos);
+      }
+    }));
+
+    _subscriptions.add(_cleanPlayer.stream.completed.listen((completed) {
+      if (completed) {
+        _cleanPlayer.seek(Duration.zero);
+        _grainPlayer.seek(Duration.zero);
       }
     }));
 

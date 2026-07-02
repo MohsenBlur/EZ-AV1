@@ -56,7 +56,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
       player.setVolume(0.0);
     }
 
-    // Lockstep frame synchronization across all 4 quadrants
+    // Lockstep frame synchronization across all 4 quadrants with 15ms threshold (~0.3 frames at 24fps)
     if (_players[0] != null) {
       _subscriptions.add(_players[0]!.stream.position.listen((pos) {
         if (!mounted || !_isPlaying) return;
@@ -64,7 +64,7 @@ class _Phase2BitrateViewState extends ConsumerState<Phase2BitrateView> {
           final player = _players[i];
           if (player != null && player.state.playing) {
             final diff = (pos - player.state.position).inMilliseconds.abs();
-            if (diff > 50) {
+            if (diff > 15) {
               player.seek(pos);
             }
           }
